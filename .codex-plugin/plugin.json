@@ -1,0 +1,40 @@
+{
+  "name": "yog",
+  "version": "0.1.0",
+  "description": "研发业务知识库插件，用 docs/knowledge 维护业务上下文、能力、证据和 ADR。",
+  "author": {
+    "name": "Yog Contributors",
+    "email": "noreply@example.com",
+    "url": "https://example.com/yog"
+  },
+  "homepage": "https://example.com/yog",
+  "repository": "https://example.com/yog",
+  "license": "MIT",
+  "keywords": [
+    "knowledge-base",
+    "business-knowledge",
+    "adr",
+    "agent-guidance"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Yog",
+    "shortDescription": "Maintain docs/knowledge business knowledge bases.",
+    "longDescription": "Yog initializes and maintains docs/knowledge business context, capability, evidence, candidate, ADR, and generated routing indexes for agent-first repository work.",
+    "developerName": "Yog Contributors",
+    "category": "Productivity",
+    "capabilities": [
+      "Write",
+      "Interactive"
+    ],
+    "websiteURL": "https://example.com/yog",
+    "privacyPolicyURL": "https://example.com/privacy",
+    "termsOfServiceURL": "https://example.com/terms",
+    "defaultPrompt": [
+      "Initialize Yog for this project.",
+      "Create a Yog business knowledge candidate.",
+      "Verify this docs/knowledge knowledge base."
+    ],
+    "brandColor": "#2563EB"
+  }
+}

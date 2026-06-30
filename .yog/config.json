@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "knowledgeRoot": "docs/knowledge",
+  "serena": {
+    "enabled": true
+  },
+  "codeFactProvider": {
+    "type": "none",
+    "status": "not-configured"
+  }
+}

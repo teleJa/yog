@@ -1,0 +1,20 @@
+{
+  "name": "yog",
+  "interface": {
+    "displayName": "Yog"
+  },
+  "plugins": [
+    {
+      "name": "yog",
+      "source": {
+        "source": "local",
+        "path": "./plugins/yog"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
