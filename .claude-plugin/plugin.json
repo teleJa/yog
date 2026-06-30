@@ -1,0 +1,9 @@
+{
+  "name": "yog",
+  "version": "0.1.0",
+  "description": "研发业务知识库插件，用 docs/knowledge 维护业务上下文、能力、证据和 ADR。",
+  "author": {
+    "name": "Yog Contributors"
+  },
+  "skills": "./skills/"
+}

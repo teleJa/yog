@@ -1,0 +1,14 @@
+{
+  "name": "yog",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Business knowledge base plugin for AI coding agents.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test",
+    "test:unit": "node --test"
+  }
+}
