@@ -1,0 +1,76 @@
+name: Feishu notify
+
+on:
+  issues:
+    types: [opened, reopened, closed]
+  pull_request:
+    types: [opened, reopened, closed, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Feishu notification
+        env:
+          WEBHOOK: ${{ secrets.FEISHU_BOT_WEBHOOK }}
+          EVENT_NAME: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
+          REPOSITORY: ${{ github.repository }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          ISSUE_USER: ${{ github.event.issue.user.login }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_USER: ${{ github.event.pull_request.user.login }}
+          PR_MERGED: ${{ github.event.pull_request.merged }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${WEBHOOK}" ]; then
+            echo "FEISHU_BOT_WEBHOOK is not configured."
+            exit 1
+          fi
+
+          if [ "${EVENT_NAME}" = "pull_request" ]; then
+            title="${PR_TITLE}"
+            url="${PR_URL}"
+            user="${PR_USER}"
+            kind="PR"
+            extra=""
+            if [ "${ACTION}" = "closed" ] && [ "${PR_MERGED}" = "true" ]; then
+              extra=" (merged)"
+            fi
+          else
+            title="${ISSUE_TITLE}"
+            url="${ISSUE_URL}"
+            user="${ISSUE_USER}"
+            kind="Issue"
+            extra=""
+          fi
+
+          export title url user kind extra
+          python3 - <<'PY' > /tmp/feishu-payload.json
+          import json
+          import os
+
+          text = (
+              f"[{os.environ['REPOSITORY']}] "
+              f"{os.environ['kind']} {os.environ['ACTION']}{os.environ['extra']}\n"
+              f"Title: {os.environ['title']}\n"
+              f"By: {os.environ['user']}\n"
+              f"URL: {os.environ['url']}"
+          )
+
+          print(json.dumps({
+              "msg_type": "text",
+              "content": {"text": text},
+          }))
+          PY
+
+          curl -fsS \
+            -H "Content-Type: application/json" \
+            -d @/tmp/feishu-payload.json \
+            "${WEBHOOK}"
