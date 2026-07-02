@@ -12,7 +12,6 @@ The knowledge base captures durable business language, capability boundaries, de
 docs/knowledge/
   README.md
   AGENTS.md
-  BUILD-PLAN.md
   CONTEXT-MAP.md
   INDEX.md
   index.json
@@ -58,7 +57,6 @@ docs/knowledge/
 ## Document Types
 
 - `CONTEXT-MAP.md`: confirmed business contexts and their relationships.
-- `BUILD-PLAN.md`: human-readable construction plan and maintenance guidance; not a machine index source.
 - `INDEX.md`: generated human-readable index.
 - `index.json`: generated machine-readable index for agent retrieval.
 - `changes/*.md`: generated or semi-generated change impact reports; not authoritative routing documents.
@@ -87,6 +85,21 @@ Build the knowledge base only from real work:
 - Conflicts between code facts and existing knowledge.
 
 Do not run a one-time full extraction that creates empty placeholder contexts. New contexts require stable business language, clear boundaries, at least one real capability, and supporting evidence.
+
+## Init And Candidate Discovery
+
+Init creates the knowledge-base skeleton only. It does not require Serena or CodeGraph and does not create business contexts, capabilities, evidence, or candidates.
+
+Automatic candidate discovery starts after init and has a stricter gate. It requires both:
+
+- Serena available to the agent for this repository.
+- CodeGraph initialized for this repository and able to answer code-structure queries.
+
+If either tool is missing or not initialized, stop automatic discovery and install or initialize the missing tool first. Do not fall back to filename-only or `rg`-only discovery for automatic candidates.
+
+When both tools are available, the agent may run `discover-candidates` by combining existing business docs, OpenSpec changes, Serena navigation, and CodeGraph call or symbol evidence. Discovery may write `needs-review` candidate documents under `candidates/*.md`, but candidates remain outside generated routing indexes until a human confirms the boundary and promotes them into formal contexts.
+
+If discovery finds more than 10 candidates, stop before writing and ask the user to narrow the scope. Duplicate candidates must not be overwritten or merged automatically.
 
 ## Minimal Build Flow
 
@@ -200,7 +213,7 @@ Script success and blocking state are expressed by exit code; do not require a g
 
 When `create-candidate` finds likely duplicates, its structured output must use `code: "candidate-duplicates-found"` and `duplicates[]` items with `path`, `candidateId`, `name`, `status`, and `matchedFields[]`. `matchedFields[]` may contain only `slug`, `name`, `keywords`, or `possible_contexts`.
 
-Reports under `changes/*.md` and `audits/*.md` are intentionally excluded from the default machine index. Directory README files, root guidance files such as `README.md`, `AGENTS.md`, `BUILD-PLAN.md`, reusable templates, and context `CONTEXT.md` files are also excluded.
+Reports under `changes/*.md` and `audits/*.md` are intentionally excluded from the default machine index. Directory README files, root guidance files such as `README.md` and `AGENTS.md`, reusable templates, and context `CONTEXT.md` files are also excluded.
 
 The global machine-readable index should stay lightweight and include routing fields such as `path`, `type`, `context`, `name`, `summary`, `keywords`, `status`, `indexPath`, and `docsCount` when available. Context entries do not use `status`; ADR entries do. Agents should prefer accepted ADRs and verified local entries during retrieval where status exists.
 
@@ -262,7 +275,6 @@ Minimum migration package:
 
 - `docs/knowledge/README.md`
 - `docs/knowledge/AGENTS.md`
-- `docs/knowledge/BUILD-PLAN.md`
 - `docs/knowledge/CONTEXT-MAP.md`
 - `docs/knowledge/templates/*.md`
 - `docs/knowledge/adr/README.md`

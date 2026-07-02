@@ -26,7 +26,8 @@ Yog 要解决的是：让 agent 先按业务知识库路由，再按证据和代
 - 使用 Markdown frontmatter 作为索引源数据，生成 `INDEX.md` 和 `index.json`。
 - 通过 managed `AGENTS.md` 和 `CLAUDE.md` block 同时支持 Codex 与 Claude Code，引导 agent 先读知识库。
 - 在未安装 GitNexus、CodeGraph 或 Serena 时，核心知识库脚本仍可运行。
-- 将 GitNexus、CodeGraph、Serena 作为可选代码事实或符号导航工具，而不是知识库核心前置依赖。
+- 将 GitNexus、CodeGraph、Serena 作为代码事实或符号导航工具，而不是 `init`、`sync`、`verify` 等核心脚本前置依赖。
+- 自动 `discover-candidates` 是 agent workflow，必须同时具备 Serena 和 CodeGraph 后才能写入 `needs-review` candidate。
 - 通过内部 `sync`、`verify`、`lint` 脚本提供本地质量门禁。
 - 首版内部脚本不引入第三方运行时 npm 依赖。
 - 首版重点是知识文档生成、索引读取和质量审核闭环。
@@ -36,6 +37,7 @@ Yog 要解决的是：让 agent 先按业务知识库路由，再按证据和代
 - 不从代码自动推断并确认业务上下文边界。
 - 不从代码事实自动把业务能力提升为 `verified`。
 - 首版不实现真实 GitNexus、Serena、CodeGraph evidence refresh。
+- 首版不允许在缺少 Serena 或 CodeGraph 时自动发现并写入候选业务边界。
 - 首版不实现 RAG、运行时日志证据、截图证据或外部契约同步。
 - 首版不安装真实 git hook、PR/MR 门禁或定时审计流水线。
 - 首版不实现语义聚类、自动合并候选或 LLM/embedding 驱动的候选去重。
@@ -75,7 +77,6 @@ Yog 初始化目标项目后，应生成或维护以下结构：
 docs/knowledge/
   README.md
   AGENTS.md
-  BUILD-PLAN.md
   CONTEXT-MAP.md
   INDEX.md
   index.json
@@ -191,6 +192,7 @@ Yog 的首版不提供用户需要记忆的公开 CLI，也不通过 MCP server 
 - 重复执行必须幂等。
 - `AGENTS.md` 和 `CLAUDE.md` 都是首版必写目标，且只能更新 Yog managed block。
 - `init` 不创建空 context、capability、evidence 或 candidate。
+- `init` 完成后应提示：自动 `discover-candidates` 需要 Serena 和 CodeGraph 都已安装并针对目标仓库可用。
 - `init` 不创建示例 ADR；只创建 `docs/knowledge/adr/` 目录。
 - `init` 创建空目录时同步创建该目录的 `README.md`，用于说明目录用途并保证目录可提交。
 - 目录 `README.md` 可由团队后续编辑，但只作为目录说明，不承载具体业务结论。
@@ -216,6 +218,7 @@ Yog skill 随后检索 `docs/knowledge/index.json`、`INDEX.md` 和 `CONTEXT-MAP
 
 - `create-candidate`：创建 `needs-review` candidate；写入前可扫描现有 `candidates/*.md` 做确定性去重。
 - `create-context`：显式创建正式 context，必须先确认 `context_id`、`name`、`summary`、`responsibilities`、`non_responsibilities`。
+- `promote-candidate`：将已有 candidate 升级为正式 context，同时创建真实 capability 和 evidence，删除 candidate，并写入 change record。
 - `create-capability`：在已有 context 下创建 `draft` capability。
 - `create-evidence`：在已有 context 和 capability 下创建 `draft` evidence。
 - `match-scope`：按用户输入的一句话，对已有 context、capability、evidence 或 ADR 做确定性候选排序；默认不扫描 candidate。
@@ -245,7 +248,8 @@ Yog skill 随后检索 `docs/knowledge/index.json`、`INDEX.md` 和 `CONTEXT-MAP
 - `create-evidence` 文件名固定为 `<capability-id>-<evidence-kind>.md`，且 `evidenceKind` 必须同步写入 frontmatter `evidence_kind`。
 - `create-evidence` 写入时必须填充 `source`、`generator` 和 `generation_evidence`；`repo_commit` 和 `generated_at` 缺失时只能创建 `draft`，不得创建 `verified` evidence。
 - 首版不提供 `mark-verified` 脚本；`verified` 必须由用户明确确认后编辑 Markdown，并通过 `lint` / `sync` 校验。
-- 首版不提供 `promote-candidate` 脚本；candidate 升级由 Yog skill 编排用户确认、`create-context` 和显式 Markdown 修改。
+- `promote-candidate` 写入前必须收到非空 `capabilities[]`，且每个 capability 至少包含一个真实 evidence；不得把 candidate 升级为空 context shell。
+- `promote-candidate` 可由 Yog skill 在用户确认后编排 subagent 并行收集业务边界、Serena 符号入口和 CodeGraph 代码证据，再一次性写入 context、capability、evidence 和 change record。
 - 文档创建后由 Yog skill 调用 `build-index` 或 `sync`，但不自动把业务结论标记为已验证。
 - `match-scope` 不做 LLM 语义推理，不自动创建 context，不扫描或升级 candidate，不自动判定 `verified`。candidate 去重属于 `create-candidate` / candidate review workflow，不属于默认 `match-scope`。
 
@@ -744,7 +748,7 @@ Managed block 只表达上述跨 agent 行为规则，不表达插件内部 scri
 
 ## 11. Candidate 升级为 Context
 
-Yog 可以建议把 candidate 升级为正式 context，但不能自动升级。
+Yog 可以在用户确认后把 candidate 升级为正式 context。升级不能只创建空 context shell，必须同时创建至少一个真实 capability 和至少一个真实 evidence。
 
 可触发升级建议的信号：
 
@@ -762,28 +766,37 @@ Yog 可以建议把 candidate 升级为正式 context，但不能自动升级。
 - `summary`
 - `responsibilities`
 - `non_responsibilities`
+- 至少一个 capability 的 `capabilityId`、`name`、`summary`、`responsibilities`、`nonResponsibilities`、真实 `body`
+- 每个 capability 至少一个 evidence 的 `evidenceKind`、`name`、`summary`、`source`、`generator`、`generation_evidence`、真实 `body`
+
+大型仓库中，Yog skill 可 spawn subagent 并行加速：
+
+- 业务边界 agent：复核 PRD、OpenSpec、candidate notes、业务术语和非职责。
+- Serena agent：定位符号、入口文件和代码归属边界。
+- CodeGraph agent：核验 routes、services、mappers、call paths 和代码事实。
 
 升级动作：
 
-- 将原 candidate 保留并标记为 `deprecated`。
-- 在 candidate 正文或 frontmatter 中记录 promoted target。
 - 创建 `contexts/<context-id>/CONTEXT.md`。
 - 创建 `contexts/<context-id>/README.md`。
-- 创建 `contexts/<context-id>/capabilities/`。
-- 创建 `contexts/<context-id>/evidence/`。
+- 创建 `contexts/<context-id>/capabilities/<capability-id>.md`。
+- 创建 `contexts/<context-id>/evidence/<capability-id>-<evidence-kind>.md`。
 - 更新 `CONTEXT-MAP.md`。
+- 删除已升级的 candidate。
+- 写入 `docs/knowledge/changes/<change-id>.md` 记录 candidate、context、capability 和 evidence 路径。
 - 重建 `INDEX.md` 和 `index.json`。
 
 若用户只确认继续补充，则保持 candidate 为 `needs-review`。
 
 首版实现边界：
 
-- 不提供 `promote-candidate` 脚本。
-- `create-context` 可以接受 `sourceCandidatePath` 用于记录来源，但不自动修改 candidate。
-- candidate 标记为 `deprecated`、记录 promoted target 必须由 agent 在用户确认后显式编辑 Markdown。
+- 提供 `promote-candidate` 脚本。
+- `promote-candidate` 缺少 capability 或 evidence 时必须失败，不写入 context，也不删除 candidate。
+- `promote-candidate` 输出必须包含 `contextPath`、`capabilityPaths`、`evidencePaths`、`changePath`、`docsCount` 和 `candidateRemoved`。
+- `docsCount: 0` 视为升级失败。
 - candidate 创建、复核、补充或升级时，可以扫描 `candidates/*.md` 做去重；去重只影响候选处理建议，不改变默认 `match-scope` 行为。
 - 命中疑似重复 candidate 时，不自动合并候选；Yog skill 必须展示重复候选的 `path`、`name`、`status` 和命中字段，让用户选择更新已有 candidate 或创建独立候选。
-- 修改后必须运行 `sync`，由 `lint` 检查 promoted candidate 是否仍被错误当作权威候选。
+- 修改后必须运行 `sync` 和 `verify`。
 
 ## 12. Evidence 切面
 
@@ -880,6 +893,7 @@ docs/knowledge/audits/YYYY-MM-DD.md
 - `init` 脚本。
 - `create-candidate` 脚本。
 - `create-context` 脚本。
+- `promote-candidate` 脚本。
 - `create-capability` 脚本。
 - `create-evidence` 脚本。
 - `match-scope` 脚本。
@@ -986,7 +1000,7 @@ skills/yog/
 - context 局部索引 entries 只包含 capability、evidence、adr-link。
 - context 局部索引 entries 必须平铺，不按 capability 嵌套 evidence。
 - context 局部索引顶层字段固定为 `schemaVersion`、`kind`、`context`、`generated_at` 和 `entries`；不得包含顶层 `stats`、`capabilityCount` 或 `evidenceCountTotal`。
-- change、audit、template、README、AGENTS、BUILD-PLAN、context `CONTEXT.md` 和 context `README.md` 不进入默认 `entries[]`。
+- change、audit、template、README、AGENTS、context `CONTEXT.md` 和 context `README.md` 不进入默认 `entries[]`。
 - `context` 字段可从路径或 frontmatter 派生。
 - 所有索引路径字段使用目标仓库根相对路径，不使用 context index 文件所在目录相对路径。
 - 全局 entries 先按 `context`、`adr` 分桶排序；context 桶内按 `path` 稳定排序，ADR 桶内按 `statusRank` 和 `path` 稳定排序。
@@ -1095,14 +1109,14 @@ skills/yog/
 
 - 自动创建 context 会把代码猜测固化成业务边界。
 - managed block 不够明确时，agent 可能跳过知识库直接搜代码。
-- provider 配置如果成为硬依赖，会阻碍团队先从纯业务文档开始。
+- provider 配置如果成为 `init` 硬依赖，会阻碍团队先从纯业务文档开始；但自动 `discover-candidates` 必须把 Serena 和 CodeGraph 作为硬前置，避免弱扫描污染候选区。
 - `verified` 如果太容易赋值，会把未经确认的代码事实变成业务事实。
 - 公开命令面过多会增加用户心智负担，削弱 agent-first 的使用体验。
 - hook、CI 或定时审计如果自动改写业务结论，会把实现变化误提升为业务设计。
 
 ## 18. 后续问题
 
-- 第二阶段先实现 GitNexus adapter、CodeGraph adapter，还是只选择一个 provider 打通闭环。
+- 第二阶段是否补充 GitNexus adapter；自动 `discover-candidates` 首版以 Serena + CodeGraph 作为硬前置。
 - `prd` evidence 首先只支持本地归档 Markdown，还是同时支持 OpenSpec 结构。
 - warning-only knowledge impact hook 是否进入第二阶段首批能力。
 - PR/MR 门禁何时从 warning 升级为阻断。

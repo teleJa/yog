@@ -54,6 +54,10 @@ test('full Yog first-version flow initializes creates syncs verifies and routes'
     generator: 'manual',
     generation_evidence: 'Reviewed route files in current repository.',
     body: 'Route POST /refunds starts refund request handling.',
+    generationMethod: 'Manual route inspection.',
+    entryPaths: '- src/refund/controller.js',
+    routes: '- POST /refunds',
+    limitations: '- Test fixture does not execute runtime HTTP calls.',
   }).status, 0);
   assert.equal(run(repoRoot, 'sync').status, 0);
   assert.equal(run(repoRoot, 'verify').status, 0);
@@ -70,7 +74,7 @@ test('full Yog flow honors custom knowledgeRoot in files indexes lint and routin
   assert.equal(runWithInput(repoRoot, 'init', { repoRoot, knowledgeRoot }).status, 0);
   assert.equal(existsSync(join(repoRoot, 'knowledge/README.md')), true);
   assert.equal(existsSync(join(repoRoot, 'docs/knowledge/README.md')), false);
-  assert.match(readFileSync(join(repoRoot, 'AGENTS.md'), 'utf8'), /read knowledge\/index\.json/);
+  assert.match(readFileSync(join(repoRoot, 'AGENTS.md'), 'utf8'), /first read knowledge\/CONTEXT-MAP\.md/);
 
   assert.equal(run(repoRoot, 'create-context', {
     contextId: 'order',
@@ -99,6 +103,10 @@ test('full Yog flow honors custom knowledgeRoot in files indexes lint and routin
     generator: 'manual',
     generation_evidence: 'Reviewed route files in current repository.',
     body: 'Route POST /refunds starts refund request handling.',
+    generationMethod: 'Manual route inspection.',
+    entryPaths: '- src/refund/controller.js',
+    routes: '- POST /refunds',
+    limitations: '- Test fixture does not execute runtime HTTP calls.',
   }).status, 0);
   assert.equal(run(repoRoot, 'sync').status, 0);
 

@@ -11,8 +11,6 @@ status: draft
 
 # {Capability} Evidence
 
-`evidence_kind` must match the file-name evidence kind: `routes`, `call-flow`, `data`, `prd`, `tests`, `ui`, or `ops`. Generation method details belong in `source`, `generator`, and `generation_evidence`.
-
 ## 生成方式
 
 ## 事实摘要

@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const initScript = join(process.cwd(), 'skills/yog/scripts/init.mjs');
+const upgradeGuidanceScript = join(process.cwd(), 'skills/yog/scripts/upgrade-guidance.mjs');
 
 function tempRepo() {
   const repoRoot = mkdtempSync(join(tmpdir(), 'yog-init-'));
@@ -21,15 +22,27 @@ function runInit(repoRoot, payload = {}) {
   });
 }
 
+function runUpgradeGuidance(repoRoot, payload = {}) {
+  return spawnSync(process.execPath, [upgradeGuidanceScript], {
+    cwd: repoRoot,
+    input: JSON.stringify({ repoRoot, payload }),
+    encoding: 'utf8',
+  });
+}
+
 test('init creates docs/knowledge skeleton config and managed blocks', () => {
   const repoRoot = tempRepo();
-  const result = runInit(repoRoot, {
-    serena: { enabled: true },
-    codeFactProvider: { type: 'none', status: 'not-configured' },
-  });
+  const result = runInit(repoRoot);
   assert.equal(result.status, 0);
-  assert.deepEqual(JSON.parse(result.stdout).issues, []);
+  const output = JSON.parse(result.stdout);
+  assert.deepEqual(output.issues, []);
+  assert.equal(output.nextSteps[0].action, 'install-hooks');
+  assert.equal(output.nextSteps[0].status, 'optional-recommended');
+  assert.match(output.nextSteps[0].message, /CONTEXT-MAP\.md/);
+  assert.equal(output.nextSteps[1].action, 'discover-candidates');
+  assert.equal(output.nextSteps[1].status, 'gated');
   assert.equal(existsSync(join(repoRoot, 'docs/knowledge/README.md')), true);
+  assert.equal(existsSync(join(repoRoot, 'docs/knowledge/BUILD-PLAN.md')), false);
   assert.equal(existsSync(join(repoRoot, 'docs/knowledge/templates/evidence.md')), true);
   assert.equal(existsSync(join(repoRoot, '.yog/config.json')), true);
   const agents = readFileSync(join(repoRoot, 'AGENTS.md'), 'utf8');
@@ -38,6 +51,33 @@ test('init creates docs/knowledge skeleton config and managed blocks', () => {
   assert.match(agents, blockPattern);
   assert.match(claude, blockPattern);
   assert.equal(agents.match(blockPattern)[0], claude.match(blockPattern)[0]);
+  assert.match(agents, /ask Yog to run install-hooks/);
+  assert.match(agents, /Run automatic discover-candidates only when Serena is available and CodeGraph is initialized/);
+  const knowledgeReadme = readFileSync(join(repoRoot, 'docs/knowledge/README.md'), 'utf8');
+  const knowledgeAgents = readFileSync(join(repoRoot, 'docs/knowledge/AGENTS.md'), 'utf8');
+  assert.match(knowledgeReadme, /Automatic candidate discovery/);
+  assert.match(knowledgeReadme, /Serena available/);
+  assert.match(knowledgeReadme, /CodeGraph initialized/);
+  assert.match(knowledgeReadme, /more than 10 candidates/);
+  assert.match(knowledgeReadme, /Minimum migration package/);
+  assert.doesNotMatch(knowledgeReadme, /docs\/knowledge\/BUILD-PLAN\.md/);
+  assert.match(knowledgeAgents, /Yog plugin skill as the complete specification/);
+  assert.match(knowledgeAgents, /ask Yog to run `install-hooks`/);
+  assert.match(knowledgeAgents, /Automatic `discover-candidates` requires both Serena and CodeGraph/);
+  assert.match(knowledgeAgents, /Do not fall back to filename-only or `rg`-only discovery/);
+  assert.doesNotMatch(knowledgeAgents, /Script success and blocking state/);
+});
+
+test('init can record selected tool configuration without requiring tools for init', () => {
+  const repoRoot = tempRepo();
+  const result = runInit(repoRoot, {
+    serena: { enabled: true },
+    codeFactProvider: { type: 'none', status: 'not-configured' },
+  });
+  assert.equal(result.status, 0);
+  const config = JSON.parse(readFileSync(join(repoRoot, '.yog/config.json'), 'utf8'));
+  assert.deepEqual(config.serena, { enabled: true });
+  assert.deepEqual(config.codeFactProvider, { type: 'none', status: 'not-configured' });
 });
 
 test('init replaces only the managed block and preserves existing file content', () => {
@@ -59,4 +99,70 @@ test('init is idempotent and does not overwrite existing template file', () => {
   const output = JSON.parse(result.stdout);
   assert.equal(output.issues.some((issue) => issue.severity === 'P2'), true);
   assert.equal(readFileSync(join(repoRoot, 'docs/knowledge/templates/evidence.md'), 'utf8'), 'team edited evidence template\n');
+});
+
+test('upgrade-guidance reports and applies README and AGENTS template updates', () => {
+  const repoRoot = tempRepo();
+  runInit(repoRoot);
+  writeFileSync(join(repoRoot, 'docs/knowledge/AGENTS.md'), '# Old Agent Guidance\n');
+  writeFileSync(join(repoRoot, 'docs/knowledge/README.md'), '# Old Knowledge README\n');
+
+  const dryRun = runUpgradeGuidance(repoRoot);
+  assert.equal(dryRun.status, 0);
+  const dryRunOutput = JSON.parse(dryRun.stdout);
+  assert.equal(dryRunOutput.applied, false);
+  assert.deepEqual(dryRunOutput.changed.sort(), ['docs/knowledge/AGENTS.md', 'docs/knowledge/README.md']);
+  assert.deepEqual(dryRunOutput.unchanged.sort(), ['AGENTS.md', 'CLAUDE.md']);
+  assert.equal(dryRunOutput.issues.every((issue) => issue.severity === 'P2'), true);
+  assert.equal(readFileSync(join(repoRoot, 'docs/knowledge/AGENTS.md'), 'utf8'), '# Old Agent Guidance\n');
+  assert.equal(readFileSync(join(repoRoot, 'docs/knowledge/README.md'), 'utf8'), '# Old Knowledge README\n');
+
+  const apply = runUpgradeGuidance(repoRoot, { apply: true });
+  assert.equal(apply.status, 0);
+  const applyOutput = JSON.parse(apply.stdout);
+  assert.equal(applyOutput.applied, true);
+  assert.deepEqual(applyOutput.changed.sort(), ['docs/knowledge/AGENTS.md', 'docs/knowledge/README.md']);
+  assert.match(readFileSync(join(repoRoot, 'docs/knowledge/AGENTS.md'), 'utf8'), /Yog plugin skill as the complete specification/);
+  assert.match(readFileSync(join(repoRoot, 'docs/knowledge/README.md'), 'utf8'), /Automatic candidate discovery/);
+
+  const clean = runUpgradeGuidance(repoRoot);
+  assert.equal(clean.status, 0);
+  const cleanOutput = JSON.parse(clean.stdout);
+  assert.deepEqual(cleanOutput.issues, []);
+  assert.deepEqual(cleanOutput.changed, []);
+  assert.deepEqual(cleanOutput.unchanged.sort(), ['AGENTS.md', 'CLAUDE.md', 'docs/knowledge/AGENTS.md', 'docs/knowledge/README.md']);
+});
+
+test('upgrade-guidance refreshes a stale root managed block and preserves surrounding content', () => {
+  const repoRoot = tempRepo();
+  runInit(repoRoot);
+  const staleBlock = [
+    '# Team Root Guidance',
+    '',
+    '<!-- YOG MANAGED BLOCK START -->',
+    'Yog knowledge routing rules:',
+    '- Before answering business, architecture, feature, or implementation questions, read docs/knowledge/index.json when it exists.',
+    '<!-- YOG MANAGED BLOCK END -->',
+    '',
+    '# Team footer notes',
+    '',
+  ].join('\n');
+  writeFileSync(join(repoRoot, 'AGENTS.md'), staleBlock);
+
+  const dryRun = JSON.parse(runUpgradeGuidance(repoRoot).stdout);
+  assert.equal(dryRun.applied, false);
+  assert.equal(dryRun.changed.includes('AGENTS.md'), true);
+  assert.equal(dryRun.unchanged.includes('CLAUDE.md'), true);
+  assert.match(readFileSync(join(repoRoot, 'AGENTS.md'), 'utf8'), /read docs\/knowledge\/index\.json/);
+
+  const apply = JSON.parse(runUpgradeGuidance(repoRoot, { apply: true }).stdout);
+  assert.equal(apply.applied, true);
+  assert.equal(apply.changed.includes('AGENTS.md'), true);
+  const upgraded = readFileSync(join(repoRoot, 'AGENTS.md'), 'utf8');
+  assert.match(upgraded, /first read docs\/knowledge\/CONTEXT-MAP\.md/);
+  assert.match(upgraded, /ask Yog to run install-hooks/);
+  assert.match(upgraded, /After a change lands, re-check the evidence documents/);
+  assert.doesNotMatch(upgraded, /read docs\/knowledge\/index\.json/);
+  assert.match(upgraded, /# Team Root Guidance/);
+  assert.match(upgraded, /# Team footer notes/);
 });

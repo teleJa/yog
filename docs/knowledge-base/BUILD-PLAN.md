@@ -43,6 +43,8 @@
 8. 业务边界、术语、设计意图、上下文拆分合并必须人工确认。
 9. `INDEX.md` 和 `index.json` 是生成型索引，可以随知识库提交，但 Markdown 源文档仍是事实源。
 10. 归档 PRD 可触发或补充知识库，但只抽取长期有效的最终业务结论。
+11. init 只创建知识库骨架，不自动创建业务 context、capability、evidence 或 candidate。
+12. 自动 `discover-candidates` 必须同时具备 Serena 和 CodeGraph；缺任一工具时停止自动候选发现，不退化为只按文件名或 `rg` 猜业务边界。
 
 ## 目录结构
 
@@ -50,7 +52,6 @@
 docs/knowledge/
   README.md
   AGENTS.md
-  BUILD-PLAN.md
   CONTEXT-MAP.md
   INDEX.md
   index.json
@@ -227,6 +228,23 @@ updated_at: ""
 
 不要因为“看起来应该完整”而创建空上下文或空能力。
 
+## 初始化与候选发现
+
+init 只负责创建 `docs/knowledge` 骨架、`.yog/config.json` 和根 managed guidance。它不依赖 Serena 或 CodeGraph，也不写入业务 context、capability、evidence 或 candidate。
+
+init 之后如果要自动发现候选，进入 `discover-candidates` agent workflow。该流程的硬前置是：
+
+- Serena 对当前仓库可用，agent 可以用它做符号导航和代码结构读取。
+- CodeGraph 已为当前仓库初始化，且可以回答代码结构、调用关系或符号查询。
+
+缺少任一条件时，停止自动发现，并提示先安装或初始化缺失工具。不要把 `rg`、目录名、Controller/Service 文件名扫描当成自动候选发现的替代方案。
+
+满足前置条件后，agent 可以结合现有业务文档、OpenSpec、Serena 和 CodeGraph 证据自动写入 `needs-review` candidate。candidate 不进入生成索引；正式 context 仍必须经过人工确认或显式升级。
+
+自动发现如果产生超过 10 个候选，先停止写入并要求用户缩小业务范围。疑似重复 candidate 不得覆盖或合并，必须跳过并输出重复项。
+
+每个自动发现 candidate 必须记录发现来源、具体证据引用和 `low` / `medium` 置信度说明。
+
 ## 最小建设流程
 
 1. 路由
@@ -236,7 +254,7 @@ updated_at: ""
    已有 capability 则更新；已有 context 但无 capability 则新增 capability；边界不清则新增或更新 candidate；存在长期硬取舍才写 ADR。
 
 3. 取证
-   使用 CodeGraph、`rg`、归档 PRD、测试记录或仓库扫描生成 / 刷新 evidence。
+   使用 Serena、CodeGraph、归档 PRD、OpenSpec、测试记录或仓库扫描生成 / 刷新 evidence。自动 candidate discovery 必须同时具备 Serena 和 CodeGraph；`rg` 只能作为人工辅助证据，不能单独驱动自动候选写入。
 
 4. 写入
    `CONTEXT.md` 写确认术语；capability 写长期业务知识；evidence 写代码事实；ADR 写长期取舍。
@@ -373,7 +391,6 @@ context 局部索引来源：
 - `docs/knowledge/CONTEXT-MAP.md`
 - `docs/knowledge/templates/*.md`
 - `docs/knowledge/adr/README.md`
-- `docs/knowledge/BUILD-PLAN.md`
 
 迁移后通过 Yog skill 刷新生成索引。
 
@@ -388,5 +405,5 @@ context 局部索引来源：
 - Yog skill 的 `lint` 和 `sync` 结果通过。
 - `index.json` 可被 JSON parser 正常读取。
 - `INDEX.md` 可读，且声明为生成产物。
-- 新增或修改的知识库源文档符合 `docs/knowledge/AGENTS.md`。
+- 新增或修改的知识库源文档符合 Yog skill 和 `docs/knowledge/AGENTS.md` 的目录级规则。
 - 没有把未确认候选写入 `CONTEXT-MAP.md` 正式上下文。

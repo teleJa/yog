@@ -1,14 +1,17 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { MANAGED_BLOCK_END, MANAGED_BLOCK_START } from './constants.mjs';
+import { routingCoreInstruction } from './routing-guidance.mjs';
 
 export function managedBlock(knowledgeRoot = 'docs/knowledge') {
   return `${MANAGED_BLOCK_START}
 Yog knowledge routing rules:
-- Before answering business, architecture, feature, or implementation questions, read ${knowledgeRoot}/index.json when it exists.
-- If a context matches, read its context index and source Markdown before making knowledge claims.
-- Use CodeGraph, Serena, GitNexus, repository scans, or tests to verify current code facts.
-- If code facts conflict with ${knowledgeRoot}, use current code facts for the task and recommend marking stale knowledge.
+- ${routingCoreInstruction(knowledgeRoot)}
+- If no context matches, use ${knowledgeRoot}/INDEX.md for routing, then explore code and docs directly.
+- Use CodeGraph, Serena, GitNexus, repository scans, or tests to verify current code facts. If code facts conflict with ${knowledgeRoot}, use current code facts for the task and recommend marking the stale knowledge.
+- After a change lands, re-check the evidence documents you relied on. If the change made them inaccurate, update them or mark them stale.
+- To make this routing reminder automatic on every prompt, ask Yog to run install-hooks. The hook is optional and non-blocking.
+- Run automatic discover-candidates only when Serena is available and CodeGraph is initialized for this repository; otherwise ask to install or initialize the missing tool first.
 ${MANAGED_BLOCK_END}`;
 }
 

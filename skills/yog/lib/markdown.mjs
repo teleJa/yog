@@ -1,5 +1,13 @@
 export function hasTemplatePlaceholder(markdown) {
-  return /\{[^}\n]+\}/.test(markdown);
+  return markdown.split('\n').some((rawLine) => {
+    const line = rawLine.trim();
+    if (!line) return false;
+    const markerless = line
+      .replace(/^#+\s+/, '')
+      .replace(/^(?:[-*]\s+|\d+[.)]\s+)/, '')
+      .trim();
+    return /^`?\{[^}\n]+\}`?[,.，。:：;；]?$/.test(markerless);
+  });
 }
 
 export function stripFrontmatter(markdown) {
@@ -8,12 +16,33 @@ export function stripFrontmatter(markdown) {
   return end === -1 ? markdown : markdown.slice(end + 5);
 }
 
+const PLACEHOLDER_TEXT_PATTERN = /^(?:[-*]\s+|\d+[.)]\s+)?(?:TODO|TBD|待补充|待确认)$/i;
+const OPEN_QUESTIONS_HEADINGS = new Set(['未确认问题', 'Open Questions']);
+
+function headingText(line) {
+  const match = line.match(/^#+\s+(.+)$/);
+  return match ? match[1].trim() : null;
+}
+
+function isAllowedPlaceholderSection(heading) {
+  return OPEN_QUESTIONS_HEADINGS.has(heading);
+}
+
 export function hasRealBodyContent(markdown) {
-  const body = stripFrontmatter(markdown)
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith('#') && !hasTemplatePlaceholder(line));
-  return body.length > 0;
+  let currentHeading = '';
+  for (const rawLine of stripFrontmatter(markdown).split('\n')) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const heading = headingText(line);
+    if (heading) {
+      currentHeading = heading;
+      continue;
+    }
+    if (hasTemplatePlaceholder(line)) continue;
+    if (PLACEHOLDER_TEXT_PATTERN.test(line) && !isAllowedPlaceholderSection(currentHeading)) continue;
+    return true;
+  }
+  return false;
 }
 
 export function normalizeGeneratedText(text) {

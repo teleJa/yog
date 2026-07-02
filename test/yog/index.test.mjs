@@ -46,6 +46,10 @@ function repoWithKnowledge() {
     generator: 'manual',
     generation_evidence: 'Reviewed route files in current repository.',
     body: 'Route POST /refunds starts refund request handling.',
+    generationMethod: 'Manual route inspection.',
+    entryPaths: '- src/refund/controller.js',
+    routes: '- POST /refunds',
+    limitations: '- Test fixture does not execute runtime HTTP calls.',
   });
   return repoRoot;
 }
