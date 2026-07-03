@@ -50,7 +50,7 @@ Exit code `0` means completed or P2-only. Exit code `1` means target repository 
 - `lint.mjs`: report P0/P1/P2 knowledge-base issues.
 - `verify.mjs`: run `check-index` and `lint` without writing.
 - `sync.mjs`: run `build-index` and `lint`.
-- `match-scope.mjs`: return deterministic business-flow, context, ADR, capability, and evidence matches.
+- `match-scope.mjs`: return deterministic business-flow, context, ADR, capability, and evidence matches for smoke checks and diagnostics. It is not the primary semantic retrieval path; normal agent routing should read `index.json`, `INDEX.md`, business-flow documents, and `CONTEXT-MAP.md`.
 
 ## Prompt Hook Integration
 
