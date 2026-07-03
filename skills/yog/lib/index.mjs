@@ -3,7 +3,7 @@ import { join, relative } from 'node:path';
 import { STATUS_RANK } from './constants.mjs';
 import { parseFrontmatter } from './frontmatter.mjs';
 import { hasRealBodyContent, hasTemplatePlaceholder, normalizeGeneratedText } from './markdown.mjs';
-import { contextPath, knowledgePath, repoRelative, resolveRepoContext } from './knowledge-root.mjs';
+import { businessFlowPath, contextPath, knowledgePath, repoRelative, resolveRepoContext } from './knowledge-root.mjs';
 
 function issue(severity, message, path, details) {
   return details ? { severity, message, path, details } : { severity, message, path };
@@ -36,7 +36,7 @@ function statusRank(status) {
 }
 
 function sortEntries(entries) {
-  const typeRank = new Map([['context', 0], ['adr', 1], ['capability', 0], ['evidence', 1], ['adr-link', 2]]);
+  const typeRank = new Map([['business-flow', 0], ['context', 1], ['adr', 2], ['capability', 0], ['evidence', 1], ['adr-link', 2]]);
   return [...entries].sort((left, right) => {
     const typeDelta = (typeRank.get(left.type) ?? 99) - (typeRank.get(right.type) ?? 99);
     if (typeDelta !== 0) return typeDelta;
@@ -58,6 +58,29 @@ function validateSourceMarkdown(repoRoot, absPath, label) {
     return [issue('P1', `${label} source is an empty shell.`, path)];
   }
   return [];
+}
+
+function readBusinessFlowEntries(repoRoot, knowledgeAbs) {
+  const flowDir = join(knowledgeAbs, 'business-flows');
+  if (!existsSync(flowDir)) return [];
+  return readdirSync(flowDir)
+    .filter((fileName) => fileName.endsWith('.md') && fileName !== 'README.md')
+    .map((fileName) => {
+      const abs = join(flowDir, fileName);
+      const data = readMarkdownFrontmatter(abs);
+      const flowId = data.flow_id ?? fileName.replace(/\.md$/, '');
+      return {
+        type: 'business-flow',
+        flow: flowId,
+        name: data.name ?? flowId,
+        summary: data.summary ?? '',
+        status: data.status ?? 'draft',
+        path: repoRelative(repoRoot, abs),
+        keywords: data.keywords ?? [],
+        relatedContexts: [...new Set(data.related_contexts ?? [])],
+        primaryContexts: [...new Set(data.primary_contexts ?? [])],
+      };
+    });
 }
 
 function readAdrEntries(repoRoot, knowledgeAbs) {
@@ -87,6 +110,15 @@ export function buildIndexes(input = {}, options = { write: true }) {
   const contexts = parsed.contexts;
   const issues = [...parsed.issues];
   const contextIds = new Set(contexts.map((item) => item.context));
+  const businessFlowEntries = readBusinessFlowEntries(repoRoot, knowledgeAbs);
+  for (const flow of businessFlowEntries) {
+    issues.push(...validateSourceMarkdown(repoRoot, join(repoRoot, flow.path), 'Business flow'));
+    for (const contextId of [...flow.primaryContexts, ...flow.relatedContexts]) {
+      if (!contextIds.has(contextId)) {
+        issues.push(issue('P1', 'Business flow references an unknown context.', flow.path, { contextId }));
+      }
+    }
+  }
   const adrEntries = readAdrEntries(repoRoot, knowledgeAbs);
   for (const adr of adrEntries) {
     issues.push(...validateSourceMarkdown(repoRoot, join(repoRoot, adr.path), 'ADR'));
@@ -98,6 +130,19 @@ export function buildIndexes(input = {}, options = { write: true }) {
   }
   const globalEntries = [];
   const contextIndexes = [];
+  for (const flow of businessFlowEntries) {
+    globalEntries.push({
+      type: 'business-flow',
+      flow: flow.flow,
+      name: flow.name,
+      summary: flow.summary,
+      status: flow.status,
+      path: flow.path,
+      keywords: flow.keywords,
+      primaryContexts: flow.primaryContexts,
+      relatedContexts: flow.relatedContexts,
+    });
+  }
   for (const item of contexts) {
     const contextDir = join(knowledgeAbs, 'contexts', item.context);
     issues.push(...validateSourceMarkdown(repoRoot, join(knowledgeAbs, item.path), 'Context'));

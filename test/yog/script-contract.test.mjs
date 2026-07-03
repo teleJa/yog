@@ -12,7 +12,25 @@ function runNode(args, options = {}) {
     cwd: root,
     input: options.input ?? '',
     encoding: 'utf8',
+    maxBuffer: 1024 * 1024 * 10,
   });
+}
+
+function candidate(index) {
+  return {
+    candidateId: `wide-entry-${index}`,
+    name: `Wide Entry ${index}`,
+    summary: 'Wide entry candidate with enough text to exercise structured stdout.',
+    business_boundary: 'Wide entry business boundary.',
+    responsibilities_hint: 'Wide entry responsibility.',
+    non_responsibilities_hint: 'Other boundaries.',
+    code_symbols: ['WideController#entry'],
+    evidence_paths: [`src/Wide${index}.java`],
+    keywords: [`wide-${index}`],
+    possible_contexts: ['wide-entry'],
+    confidence: 'medium',
+    confidence_reason: 'Regression fixture.',
+  };
 }
 
 test('plugin exposes exactly one Yog skill directory', () => {
@@ -94,4 +112,28 @@ test('upgrade-guidance script accepts empty stdin as structured input', () => {
     changed: [],
     unchanged: [],
   });
+});
+
+test('reduce-candidates exit 3 still emits complete parseable JSON', () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), 'yog-contract-reduce-json-'));
+  mkdirSync(join(repoRoot, '.git'));
+  runNode(['skills/yog/scripts/init.mjs'], { input: JSON.stringify({ repoRoot }) });
+  const result = runNode(['skills/yog/scripts/reduce-candidates.mjs'], {
+    input: JSON.stringify({
+      repoRoot,
+      payload: {
+        batches: [
+          {
+            agent: 'service-flow-agent',
+            candidates: [candidate(1), candidate(2)],
+          },
+        ],
+      },
+    }),
+  });
+  assert.equal(result.status, 3);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.gate, 'batch-duplicates-require-resolution');
+  assert.equal(output.stats.batchDuplicates, 1);
+  assert.equal(result.stderr, '');
 });

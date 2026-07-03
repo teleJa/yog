@@ -1,9 +1,9 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { EVIDENCE_KINDS, ID_PATTERN } from './constants.mjs';
+import { CODE_SYMBOL_PATTERN, EVIDENCE_KINDS, ID_PATTERN } from './constants.mjs';
 import { mergeConfig, writeConfig } from './config.mjs';
-import { parseFrontmatter } from './frontmatter.mjs';
+import { parseFrontmatter, stringifyFrontmatter } from './frontmatter.mjs';
 import { hasRealBodyContent, hasTemplatePlaceholder } from './markdown.mjs';
 import { contextPath, knowledgePath, readRepoConfig, repoRelative, resolveRepoContext } from './knowledge-root.mjs';
 import { upsertManagedBlock, writeRootManagedBlocks } from './managed-block.mjs';
@@ -55,7 +55,7 @@ export function initKnowledgeBase(input = {}) {
       {
         action: 'install-hooks',
         status: 'optional-recommended',
-        message: `Offer to run install-hooks.mjs so future prompts automatically remind agents to read ${context.knowledgeRoot}/CONTEXT-MAP.md before business, design, interface, or implementation work.`,
+        message: `Offer to run install-hooks.mjs so future prompts automatically remind agents to route through ${context.knowledgeRoot}/index.json, INDEX.md, business-flow matches, and CONTEXT-MAP.md before business, design, interface, or implementation work.`,
       },
       {
         action: 'discover-candidates',
@@ -217,32 +217,65 @@ function formatInlineList(value) {
   return `[${normalizeList(value).join(', ')}]`;
 }
 
+function uniqueSorted(values) {
+  return [...new Set((values ?? []).map((value) => String(value ?? '').trim()).filter(Boolean))].sort((left, right) => left.localeCompare(right));
+}
+
+function uniquePreserve(values) {
+  const seen = new Set();
+  return (values ?? [])
+    .map((value) => String(value ?? '').trim())
+    .filter(Boolean)
+    .filter((value) => {
+      if (seen.has(value)) return false;
+      seen.add(value);
+      return true;
+    });
+}
+
 function readCandidateFrontmatter(filePath) {
   return parseFrontmatter(readFileSync(filePath, 'utf8')).data;
 }
 
-function findCandidateDuplicates(context, payload) {
+function findCandidateDuplicates(context, payload, options = {}) {
   const { knowledgeAbs, knowledgeRoot } = context;
   const candidateDir = join(knowledgeAbs, 'candidates');
   if (!existsSync(candidateDir)) return [];
+  const candidateIds = normalizeList(payload.candidateIdsForDuplicateCheck ?? payload.candidateIds ?? payload.candidateId);
   const requested = {
-    slug: normalizeDuplicateToken(payload.candidateId),
+    slugs: new Set(candidateIds.map(normalizeDuplicateToken)),
     name: normalizeDuplicateToken(payload.name),
     keywords: new Set(normalizeList(payload.keywords).map(normalizeDuplicateToken)),
     possible_contexts: new Set(normalizeList(payload.possibleContexts ?? payload.possible_contexts).map(normalizeDuplicateToken)),
+    code_symbols: new Set(normalizeList(payload.code_symbols ?? payload.codeSymbols).map(normalizeDuplicateToken)),
   };
   return readdirSync(candidateDir)
     .filter((fileName) => fileName.endsWith('.md'))
-    .map((fileName) => {
+    .flatMap((fileName) => {
       const filePath = join(candidateDir, fileName);
-      const data = readCandidateFrontmatter(filePath);
+      let data = {};
+      try {
+        data = readCandidateFrontmatter(filePath);
+      } catch (error) {
+        if (options.warnings) {
+          options.warnings.push({
+            severity: 'P2',
+            message: 'Existing candidate frontmatter could not be parsed; skipped duplicate check for this file.',
+            path: knowledgePath(knowledgeRoot, 'candidates', fileName),
+            details: { reason: error.message },
+          });
+        }
+        return [];
+      }
       const matchedFields = [];
-      if (normalizeDuplicateToken(fileName.replace(/\.md$/, '')) === requested.slug) matchedFields.push('slug');
-      if (normalizeDuplicateToken(data.name) === requested.name) matchedFields.push('name');
+      if (requested.slugs.has(normalizeDuplicateToken(fileName.replace(/\.md$/, '')))) matchedFields.push('slug');
+      if (requested.name && normalizeDuplicateToken(data.name) === requested.name) matchedFields.push('name');
       const existingKeywords = normalizeList(data.keywords).map(normalizeDuplicateToken);
       const existingContexts = normalizeList(data.possible_contexts).map(normalizeDuplicateToken);
+      const existingSymbols = normalizeList(data.code_symbols).map(normalizeDuplicateToken);
       if (existingKeywords.some((keyword) => requested.keywords.has(keyword))) matchedFields.push('keywords');
       if (existingContexts.some((context) => requested.possible_contexts.has(context))) matchedFields.push('possible_contexts');
+      if (existingSymbols.some((symbol) => requested.code_symbols.has(symbol))) matchedFields.push('code_symbols');
       return {
         path: knowledgePath(knowledgeRoot, 'candidates', fileName),
         candidateId: fileName.replace(/\.md$/, ''),
@@ -252,6 +285,32 @@ function findCandidateDuplicates(context, payload) {
       };
     })
     .filter((candidate) => candidate.matchedFields.length > 0);
+}
+
+function normalizeSymbolSegment(value) {
+  const parts = String(value).split('.').filter(Boolean);
+  return parts.at(-1) ?? '';
+}
+
+function canonicalizeCodeSymbol(value) {
+  let symbol = String(value ?? '').trim();
+  if (!symbol || /[/\\]/.test(symbol) || /\s/.test(symbol) || symbol.includes(':')) return null;
+  symbol = symbol.replace(/\([^)]*\)$/, '');
+  if (symbol.includes('#')) {
+    const [rawClass, rawMember, ...rest] = symbol.split('#');
+    if (rest.length > 0 || !rawClass || !rawMember) return null;
+    const className = normalizeSymbolSegment(rawClass);
+    const canonical = `${className}#${rawMember}`;
+    return CODE_SYMBOL_PATTERN.test(canonical) ? canonical : null;
+  }
+  if (/^[A-Za-z_$][$A-Za-z0-9_]*(?:\.[A-Za-z_$][$A-Za-z0-9_]*)+$/.test(symbol)) {
+    const parts = symbol.split('.');
+    const className = parts.at(-2);
+    const memberName = parts.at(-1);
+    const canonical = `${className}#${memberName}`;
+    return CODE_SYMBOL_PATTERN.test(canonical) ? canonical : null;
+  }
+  return CODE_SYMBOL_PATTERN.test(symbol) ? symbol : null;
 }
 
 function inputIssue(message, details = {}) {
@@ -383,6 +442,482 @@ function injectOptionalAfterHeading(markdown, heading, content) {
   return injectAfterHeading(markdown, heading, content);
 }
 
+const CANDIDATE_SECTIONS = [
+  '触发信号',
+  '可能的业务含义',
+  '可能归属的上下文',
+  '相关证据',
+  '为什么暂不创建正式 Context',
+  '需要确认的问题',
+  '处理结果',
+];
+
+function fallbackText(value, fallback) {
+  return asText(value) || fallback;
+}
+
+function extractSections(markdown) {
+  const sections = new Map();
+  let current = null;
+  for (const rawLine of markdown.split('\n')) {
+    const heading = rawLine.match(/^##\s+(.+)$/);
+    if (heading) {
+      current = heading[1].trim();
+      sections.set(current, []);
+      continue;
+    }
+    if (current) sections.get(current).push(rawLine);
+  }
+  return new Map([...sections.entries()].map(([heading, lines]) => [heading, lines.join('\n').trim()]));
+}
+
+function sectionIsEmptyOrFallback(value) {
+  const text = String(value ?? '').trim();
+  return !text || /^\[待补充：/.test(text);
+}
+
+function mergeLineSection(existing, incoming) {
+  return uniqueLines([existing, incoming]).join('\n');
+}
+
+function renderCandidateMarkdown(data, title, sections) {
+  const body = [
+    stringifyFrontmatter(data).trim(),
+    '',
+    `# ${title}`,
+    '',
+    ...CANDIDATE_SECTIONS.flatMap((heading) => [`## ${heading}`, '', sections.get(heading) ?? '', '']),
+  ].join('\n');
+  return body.replace(/\n{4,}/g, '\n\n\n');
+}
+
+function candidateSectionsFromPayload(payload) {
+  const triggerSignals = fallbackText(
+    payload.triggerSignals ?? payload.body,
+    `[待补充：discover 阶段未提供触发信号，请在 review 时补齐]`,
+  );
+  const possibleContexts = normalizeList(payload.possibleContexts ?? payload.possible_contexts);
+  return new Map([
+    ['触发信号', triggerSignals],
+    ['可能的业务含义', fallbackText(payload.businessMeaning, '[待补充：promote 阶段从文档/PRD 核实]')],
+    ['可能归属的上下文', possibleContexts.length > 0 ? possibleContexts.map((item) => `- ${item}`).join('\n') : '[待补充：候选归属上下文需在 promote 阶段确认]'],
+    ['相关证据', fallbackText(payload.evidence, '[待补充：代码符号、路径或执行结构证据需在 review 时补齐]')],
+    ['为什么暂不创建正式 Context', fallbackText(payload.notFormalReason, 'needs-review：业务边界与归属待人工确认')],
+    ['需要确认的问题', fallbackText(payload.openQuestions, '[待补充：业务边界与职责范围需在 promote 阶段确认]')],
+    ['处理结果', '待 review / promote'],
+  ]);
+}
+
+function candidateMissingFields(candidate) {
+  const missing = [];
+  if (!candidate.candidateId) missing.push('candidateId');
+  if (!candidate.name) missing.push('name');
+  if (!candidate.summary) missing.push('summary');
+  if (normalizeList(candidate.code_symbols ?? candidate.codeSymbols).length === 0
+    && normalizeList(candidate.identity_symbols ?? candidate.identitySymbols).length === 0) {
+    missing.push('code_symbols');
+  }
+  if (normalizeList(candidate.evidence_paths ?? candidate.evidencePaths).length === 0) missing.push('evidence_paths');
+  return missing;
+}
+
+function normalizeSymbolsForReduce(candidate) {
+  const inputSymbols = normalizeList(candidate.code_symbols ?? candidate.codeSymbols);
+  const explicitIdentitySymbols = normalizeList(candidate.identity_symbols ?? candidate.identitySymbols);
+  const explicitSupportingSymbols = normalizeList(candidate.supporting_symbols ?? candidate.supportingSymbols);
+  const identityInputSymbols = explicitIdentitySymbols.length > 0 ? explicitIdentitySymbols : inputSymbols;
+  const supportingInputSymbols = explicitIdentitySymbols.length > 0
+    ? uniquePreserve([...explicitSupportingSymbols, ...inputSymbols.filter((symbol) => !explicitIdentitySymbols.includes(symbol))])
+    : explicitSupportingSymbols;
+  const canonicalIdentitySymbols = [];
+  const canonicalSupportingSymbols = [];
+  const invalidSymbols = [];
+  for (const symbol of identityInputSymbols) {
+    const canonical = canonicalizeCodeSymbol(symbol);
+    if (canonical) canonicalIdentitySymbols.push(canonical);
+    else invalidSymbols.push(String(symbol ?? '').trim());
+  }
+  for (const symbol of supportingInputSymbols) {
+    const canonical = canonicalizeCodeSymbol(symbol);
+    if (canonical) canonicalSupportingSymbols.push(canonical);
+    else invalidSymbols.push(String(symbol ?? '').trim());
+  }
+  return {
+    inputSymbols,
+    identityInputSymbols,
+    supportingInputSymbols,
+    canonicalIdentitySymbols: uniqueSorted(canonicalIdentitySymbols),
+    canonicalSupportingSymbols: uniqueSorted(canonicalSupportingSymbols),
+    invalidSymbols: uniquePreserve(invalidSymbols),
+  };
+}
+
+function normalizeCandidateForReduce(candidate, agent, index) {
+  const missing = candidateMissingFields(candidate);
+  const symbols = normalizeSymbolsForReduce(candidate);
+  if (symbols.canonicalIdentitySymbols.length === 0 && symbols.identityInputSymbols.length > 0) missing.push('canonical code_symbols');
+  return {
+    sourceIndex: index,
+    agent,
+    allowSameAgentJoin: candidate.allow_same_agent_join === true || candidate.allowSameAgentJoin === true,
+    candidateId: candidate.candidateId ?? '',
+    name: candidate.name ?? '',
+    summary: candidate.summary ?? '',
+    business_boundary: candidate.business_boundary ?? candidate.businessBoundary ?? '',
+    responsibilities_hint: candidate.responsibilities_hint ?? candidate.responsibilitiesHint ?? '',
+    non_responsibilities_hint: candidate.non_responsibilities_hint ?? candidate.nonResponsibilitiesHint ?? '',
+    code_symbols: symbols.inputSymbols,
+    identity_symbols: symbols.identityInputSymbols,
+    supporting_symbols: symbols.supportingInputSymbols,
+    canonicalIdentitySymbols: symbols.canonicalIdentitySymbols,
+    canonicalSupportingSymbols: symbols.canonicalSupportingSymbols,
+    canonicalSymbols: uniqueSorted([...symbols.canonicalIdentitySymbols, ...symbols.canonicalSupportingSymbols]),
+    invalidSymbols: symbols.invalidSymbols,
+    evidence_paths: uniqueSorted(normalizeList(candidate.evidence_paths ?? candidate.evidencePaths)),
+    keywords: uniqueSorted(normalizeList(candidate.keywords)),
+    possible_contexts: uniqueSorted(normalizeList(candidate.possible_contexts ?? candidate.possibleContexts)),
+    confidence: candidate.confidence ?? '',
+    confidence_reason: candidate.confidence_reason ?? candidate.confidenceReason ?? '',
+    skip_reason: candidate.skip_reason ?? candidate.skipReason ?? '',
+    missing,
+  };
+}
+
+function makeRejectedCandidate(candidate, reasons) {
+  return {
+    agent: candidate.agent,
+    candidateId: candidate.candidateId,
+    name: candidate.name,
+    reasons,
+    invalidSymbols: candidate.invalidSymbols,
+  };
+}
+
+function canJoinByIdentity(left, right) {
+  if (left.agent !== right.agent) return true;
+  if (normalizeDuplicateToken(left.candidateId) === normalizeDuplicateToken(right.candidateId)) return true;
+  return left.allowSameAgentJoin === true && right.allowSameAgentJoin === true;
+}
+
+function candidateBrief(candidate) {
+  return { candidateId: candidate.candidateId, name: candidate.name, agent: candidate.agent };
+}
+
+function connectedComponents(candidates) {
+  const parents = candidates.map((_, index) => index);
+  const joinConflicts = [];
+  const find = (index) => {
+    while (parents[index] !== index) {
+      parents[index] = parents[parents[index]];
+      index = parents[index];
+    }
+    return index;
+  };
+  const union = (left, right) => {
+    const leftRoot = find(left);
+    const rightRoot = find(right);
+    if (leftRoot !== rightRoot) parents[rightRoot] = leftRoot;
+  };
+  const symbolOwners = new Map();
+  candidates.forEach((candidate, index) => {
+    for (const symbol of candidate.canonicalIdentitySymbols) {
+      if (symbolOwners.has(symbol)) {
+        const ownerIndex = symbolOwners.get(symbol);
+        const owner = candidates[ownerIndex];
+        if (canJoinByIdentity(owner, candidate)) {
+          union(ownerIndex, index);
+        } else {
+          joinConflicts.push({
+            reason: 'same-agent-identity-symbol',
+            symbol,
+            left: candidateBrief(owner),
+            right: candidateBrief(candidate),
+          });
+        }
+      } else {
+        symbolOwners.set(symbol, index);
+      }
+    }
+  });
+  const groups = new Map();
+  candidates.forEach((candidate, index) => {
+    const root = find(index);
+    groups.set(root, [...(groups.get(root) ?? []), candidate]);
+  });
+  return { groups: [...groups.values()], joinConflicts };
+}
+
+function representativeForCluster(items) {
+  return [...items].sort((left, right) => {
+    const rightEvidence = right.canonicalSymbols.length + right.evidence_paths.length;
+    const leftEvidence = left.canonicalSymbols.length + left.evidence_paths.length;
+    if (rightEvidence !== leftEvidence) return rightEvidence - leftEvidence;
+    return left.candidateId.localeCompare(right.candidateId);
+  })[0];
+}
+
+function scoreCluster(identitySymbols, supportingSymbols, evidencePaths, hitAgents) {
+  const score = Math.min(identitySymbols.length, 10) * 2
+    + Math.min(supportingSymbols.length, 10)
+    + evidencePaths.length
+    + (hitAgents.length >= 2 ? 3 : 0);
+  const confidence = score >= 8 ? 'high' : (score >= 4 ? 'medium' : 'low');
+  return { score, confidence };
+}
+
+function renderTriggerSignals(cluster, canonicalSymbols) {
+  return uniquePreserve([
+    ...cluster.items.map((item) => `- ${item.agent}: ${item.summary}`),
+    `- hitAgents: ${cluster.hitAgents.join(', ')}`,
+    `- code_symbols: ${canonicalSymbols.slice(0, 8).join(', ')}`,
+  ]).join('\n');
+}
+
+function renderEvidence(canonicalSymbols, evidencePaths) {
+  return [
+    ...canonicalSymbols.map((symbol) => `- symbol: ${symbol}`),
+    ...evidencePaths.map((path) => `- path: ${path}`),
+  ].join('\n');
+}
+
+function renderOpenQuestions(cluster, possibleDuplicates = []) {
+  const lines = [];
+  for (const item of cluster.items) {
+    if (item.responsibilities_hint) lines.push(`- 需确认是否负责：${item.responsibilities_hint}`);
+    if (item.non_responsibilities_hint) lines.push(`- 需确认是否不负责：${item.non_responsibilities_hint}`);
+  }
+  for (const duplicate of possibleDuplicates) {
+    lines.push(`- 疑似与 ${duplicate.right.candidateId} 重复，待确认。`);
+  }
+  return uniquePreserve(lines).join('\n') || '[待补充：业务边界与职责范围需在 promote 阶段确认]';
+}
+
+function clusterToPayload(cluster, duplicateHints = []) {
+  const representative = cluster.representative;
+  const triggerSignals = renderTriggerSignals(cluster, cluster.canonicalSymbols);
+  return {
+    candidateId: representative.candidateId,
+    name: representative.name,
+    summary: representative.summary,
+    body: triggerSignals,
+    triggerSignals,
+    businessMeaning: representative.business_boundary || '[待补充：promote 阶段从文档/PRD 核实]',
+    possibleContexts: cluster.possible_contexts,
+    keywords: cluster.keywords,
+    code_symbols: cluster.canonicalSymbols,
+    identity_symbols: cluster.identitySymbols,
+    supporting_symbols: cluster.supportingSymbols,
+    evidence: renderEvidence(cluster.canonicalSymbols, cluster.evidence_paths),
+    notFormalReason: 'needs-review：业务边界与归属待人工确认',
+    openQuestions: renderOpenQuestions(cluster, duplicateHints),
+    confidence: cluster.confidence,
+    score: cluster.score,
+    hitAgents: cluster.hitAgents,
+    canonicalSymbols: cluster.canonicalSymbols,
+    identitySymbols: cluster.identitySymbols,
+    supportingSymbols: cluster.supportingSymbols,
+    evidence_paths: cluster.evidence_paths,
+    mergedFrom: cluster.items.map((item) => ({ candidateId: item.candidateId, agent: item.agent })),
+    agent_confidence: cluster.items.map((item) => ({ agent: item.agent, confidence: item.confidence, reason: item.confidence_reason })),
+    invalidSymbols: uniquePreserve(cluster.items.flatMap((item) => item.invalidSymbols)),
+    candidateIdsForDuplicateCheck: uniqueSorted(cluster.items.map((item) => item.candidateId)),
+  };
+}
+
+function clustersHaveSubjectiveOverlap(left, right) {
+  const checks = [];
+  if (normalizeDuplicateToken(left.representative.candidateId) === normalizeDuplicateToken(right.representative.candidateId)) checks.push('candidateId');
+  if (normalizeDuplicateToken(left.representative.name) === normalizeDuplicateToken(right.representative.name)) checks.push('name');
+  const rightKeywords = new Set(right.keywords.map(normalizeDuplicateToken));
+  const rightContexts = new Set(right.possible_contexts.map(normalizeDuplicateToken));
+  if (left.keywords.map(normalizeDuplicateToken).some((keyword) => rightKeywords.has(keyword))) checks.push('keywords');
+  if (left.possible_contexts.map(normalizeDuplicateToken).some((context) => rightContexts.has(context))) checks.push('possible_contexts');
+  return checks;
+}
+
+function findBatchDuplicatePlan(candidates) {
+  const blocking = [];
+  const slugOwners = new Map();
+  const identityOwners = new Map();
+  for (const payload of candidates) {
+    const slug = normalizeDuplicateToken(payload.candidateId);
+    if (slugOwners.has(slug)) {
+      blocking.push({
+        reason: 'same-candidate-id',
+        candidateIds: [slugOwners.get(slug).candidateId, payload.candidateId],
+        actionRequired: 'merge-or-rename',
+      });
+    } else {
+      slugOwners.set(slug, payload);
+    }
+    for (const symbol of normalizeList(payload.identity_symbols ?? payload.identitySymbols)) {
+      const canonical = canonicalizeCodeSymbol(symbol);
+      if (!canonical) continue;
+      if (identityOwners.has(canonical)) {
+        blocking.push({
+          reason: 'same-identity-symbol',
+          symbol: canonical,
+          candidateIds: [identityOwners.get(canonical).candidateId, payload.candidateId],
+          actionRequired: 'merge-or-rename',
+        });
+      } else {
+        identityOwners.set(canonical, payload);
+      }
+    }
+  }
+  return blocking;
+}
+
+export function reduceCandidates(input = {}) {
+  const context = resolveRepoContext(input);
+  const batches = input.payload?.batches;
+  const maxCandidates = Number.isInteger(input.payload?.maxCandidates) ? input.payload.maxCandidates : 10;
+  if (!Array.isArray(batches)) {
+    return {
+      code: 2,
+      output: { issues: [inputIssue('payload.batches must be an array.', { field: 'payload.batches' })] },
+    };
+  }
+  const invalidBatches = [];
+  const rawCandidates = [];
+  for (const [batchIndex, batch] of batches.entries()) {
+    if (!batch || typeof batch !== 'object' || Array.isArray(batch) || !Array.isArray(batch.candidates)) {
+      invalidBatches.push(inputIssue('Each batch must be an object with candidates array.', { batchIndex }));
+      continue;
+    }
+    const agent = batch.agent ?? `batch-${batchIndex}`;
+    batch.candidates.forEach((candidate, candidateIndex) => {
+      rawCandidates.push(normalizeCandidateForReduce(candidate, agent, candidateIndex));
+    });
+  }
+  if (invalidBatches.length > 0) {
+    return { code: 2, output: { issues: invalidBatches } };
+  }
+  const rejected = [];
+  const valid = [];
+  for (const candidate of rawCandidates) {
+    const reasons = [];
+    if (candidate.candidateId && !ID_PATTERN.test(candidate.candidateId)) reasons.push('candidateId must match [a-z][a-z0-9-]*');
+    if (candidate.missing.includes('candidateId')) reasons.push('candidateId is required');
+    if (candidate.missing.includes('name')) reasons.push('name is required');
+    if (candidate.missing.includes('summary')) reasons.push('summary is required');
+    if (candidate.missing.includes('code_symbols')) reasons.push('code_symbols is required');
+    if (candidate.missing.includes('canonical code_symbols')) reasons.push('code_symbols has no canonical entries');
+    if (candidate.missing.includes('evidence_paths')) reasons.push('evidence_paths is required');
+    if (reasons.length > 0) rejected.push(makeRejectedCandidate(candidate, reasons));
+    else valid.push(candidate);
+  }
+  const components = connectedComponents(valid);
+  const clusters = components.groups.map((items) => {
+    const representative = representativeForCluster(items);
+    const identitySymbols = uniqueSorted(items.flatMap((item) => item.canonicalIdentitySymbols));
+    const supportingSymbols = uniqueSorted(items.flatMap((item) => item.canonicalSupportingSymbols)
+      .filter((symbol) => !identitySymbols.includes(symbol)));
+    const canonicalSymbols = uniqueSorted(items.flatMap((item) => item.canonicalSymbols));
+    const evidencePaths = uniqueSorted(items.flatMap((item) => item.evidence_paths));
+    const hitAgents = uniqueSorted(items.map((item) => item.agent));
+    const { score, confidence } = scoreCluster(identitySymbols, supportingSymbols, evidencePaths, hitAgents);
+    return {
+      representative,
+      items,
+      identitySymbols,
+      supportingSymbols,
+      canonicalSymbols,
+      evidence_paths: evidencePaths,
+      hitAgents,
+      keywords: uniqueSorted(items.flatMap((item) => item.keywords)),
+      possible_contexts: uniqueSorted(items.flatMap((item) => item.possible_contexts)),
+      score,
+      confidence,
+    };
+  }).sort((left, right) => left.representative.candidateId.localeCompare(right.representative.candidateId));
+  const baseStats = {
+    raw: rawCandidates.length,
+    afterFormat: valid.length,
+    clusters: clusters.length,
+    writable: 0,
+    lowConfidence: 0,
+    possibleDuplicates: 0,
+    diskDuplicates: 0,
+    joinConflicts: components.joinConflicts.length,
+    rejected: rejected.length,
+  };
+  if (clusters.length > maxCandidates) {
+    return {
+      code: 1,
+      output: {
+        gate: 'narrow-scope-required',
+        stats: baseStats,
+        writable: [],
+        lowConfidence: [],
+        possibleDuplicates: [],
+        joinConflicts: components.joinConflicts,
+        rejected,
+      },
+    };
+  }
+  const possibleDuplicates = [];
+  for (let leftIndex = 0; leftIndex < clusters.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < clusters.length; rightIndex += 1) {
+      const matchedFields = clustersHaveSubjectiveOverlap(clusters[leftIndex], clusters[rightIndex]);
+      if (matchedFields.length > 0) {
+        possibleDuplicates.push({
+          left: { candidateId: clusters[leftIndex].representative.candidateId, name: clusters[leftIndex].representative.name },
+          right: { candidateId: clusters[rightIndex].representative.candidateId, name: clusters[rightIndex].representative.name },
+          matchedFields,
+        });
+      }
+    }
+  }
+  const duplicateHintsByCandidateId = new Map();
+  for (const duplicate of possibleDuplicates) {
+    duplicateHintsByCandidateId.set(duplicate.left.candidateId, [...(duplicateHintsByCandidateId.get(duplicate.left.candidateId) ?? []), duplicate]);
+  }
+  const writable = [];
+  const lowConfidence = [];
+  for (const cluster of clusters) {
+    const payload = clusterToPayload(cluster, duplicateHintsByCandidateId.get(cluster.representative.candidateId) ?? []);
+    if (cluster.confidence === 'low') lowConfidence.push(payload);
+    else writable.push(payload);
+  }
+  const warnings = [];
+  let diskDuplicateCount = 0;
+  for (const payload of [...writable, ...lowConfidence]) {
+    const duplicates = findCandidateDuplicates(context, payload, { warnings });
+    if (duplicates.length > 0) {
+      diskDuplicateCount += 1;
+      payload.diskDuplicate = {
+        matched: true,
+        candidateIds: uniqueSorted(duplicates.map((duplicate) => duplicate.candidateId)),
+      };
+    }
+  }
+  const batchDuplicates = findBatchDuplicatePlan([...writable, ...lowConfidence]);
+  const stats = {
+    ...baseStats,
+    writable: writable.length,
+    lowConfidence: lowConfidence.length,
+    possibleDuplicates: possibleDuplicates.length,
+    diskDuplicates: diskDuplicateCount,
+    batchDuplicates: batchDuplicates.length,
+  };
+  const gate = batchDuplicates.length > 0 ? 'batch-duplicates-require-resolution' : 'ok';
+  return {
+    code: (diskDuplicateCount > 0 || batchDuplicates.length > 0) ? 3 : 0,
+    output: {
+      gate,
+      stats,
+      writable,
+      lowConfidence,
+      possibleDuplicates,
+      batchDuplicates,
+      joinConflicts: components.joinConflicts,
+      rejected,
+      issues: warnings,
+    },
+  };
+}
+
 function evidenceSectionFallback(evidenceKind, heading) {
   const descriptions = {
     '路由 / 接口': '本证据类型未覆盖路由或接口；如需要该事实，请补充 routes evidence。',
@@ -408,6 +943,14 @@ function asText(value) {
 
 function sectionText(value, fallback) {
   return asText(value) || fallback;
+}
+
+function contextMapSummary(value) {
+  return asText(value)
+    .split('\n')
+    .map((line) => line.trim().replace(/^[-*]\s+/, ''))
+    .filter(Boolean)
+    .join('; ');
 }
 
 function capabilitySummaryList(capabilities) {
@@ -476,17 +1019,74 @@ export function createCandidate(input) {
   const context = resolveRepoContext(input);
   const { knowledgeAbs, knowledgeRoot } = context;
   const payload = input.payload ?? {};
+  const effectiveBody = payload.body ?? payload.triggerSignals;
   const issues = [
     assertValidId(payload.candidateId, 'candidateId'),
     !payload.name ? inputIssue('name is required.', { field: 'name' }) : null,
     !payload.summary ? inputIssue('summary is required.', { field: 'summary' }) : null,
-    assertRealBody(payload.body, 'body'),
+    assertRealBody(effectiveBody, 'body'),
   ].filter(Boolean);
   if (issues.length) return { code: 2, output: { issues } };
   const template = readRequiredTemplate(context, 'candidate.md');
   if (template.issue) return { code: 1, output: { issues: [template.issue] } };
+  const candidateDir = join(knowledgeAbs, 'candidates');
+  const updateCandidateId = payload.updateCandidateId;
+  if (payload.updateExisting) {
+    const updateIssues = [
+      assertValidId(updateCandidateId, 'updateCandidateId'),
+      !payload.confirmDuplicate ? inputIssue('confirmDuplicate is required when updateExisting is true.', { field: 'confirmDuplicate' }) : null,
+    ].filter(Boolean);
+    if (updateIssues.length) return { code: 2, output: { issues: updateIssues } };
+    const target = join(candidateDir, `${updateCandidateId}.md`);
+    if (!existsSync(target)) {
+      return { code: 1, output: { issues: [targetIssue('Candidate to update does not exist.', knowledgePath(knowledgeRoot, 'candidates', `${updateCandidateId}.md`))] } };
+    }
+    const parsed = parseFrontmatter(readFileSync(target, 'utf8'));
+    const oldData = parsed.data;
+    const oldSections = extractSections(parsed.body);
+    const incomingSections = candidateSectionsFromPayload({ ...payload, body: effectiveBody });
+    const mergedSections = new Map(oldSections);
+    const mergedFields = [];
+    for (const key of ['keywords', 'possible_contexts', 'code_symbols', 'identity_symbols', 'supporting_symbols']) {
+      const payloadValue = key === 'possible_contexts'
+        ? (payload.possibleContexts ?? payload.possible_contexts)
+        : (key === 'code_symbols'
+            ? (payload.code_symbols ?? payload.codeSymbols)
+            : (key === 'identity_symbols'
+                ? (payload.identity_symbols ?? payload.identitySymbols)
+                : (key === 'supporting_symbols' ? (payload.supporting_symbols ?? payload.supportingSymbols) : payload.keywords)));
+      const merged = uniqueSorted([...normalizeList(oldData[key]), ...normalizeList(payloadValue)]);
+      if (merged.join('\0') !== normalizeList(oldData[key]).join('\0')) mergedFields.push(key);
+      oldData[key] = merged;
+    }
+    if (!oldData.name && payload.name) oldData.name = payload.name;
+    oldData.status = oldData.status || 'needs-review';
+    oldData.promoted_to = oldData.promoted_to ?? '';
+    for (const heading of ['触发信号', '相关证据']) {
+      const merged = mergeLineSection(mergedSections.get(heading), incomingSections.get(heading));
+      if (merged !== (mergedSections.get(heading) ?? '')) mergedFields.push(heading);
+      mergedSections.set(heading, merged);
+    }
+    for (const heading of ['可能的业务含义', '可能归属的上下文', '为什么暂不创建正式 Context', '需要确认的问题']) {
+      if (sectionIsEmptyOrFallback(mergedSections.get(heading))) mergedSections.set(heading, incomingSections.get(heading));
+    }
+    if (sectionIsEmptyOrFallback(mergedSections.get('处理结果'))) mergedSections.set('处理结果', '待 review / promote');
+    const title = oldData.name || payload.name;
+    writeMarkdown(target, renderCandidateMarkdown(oldData, title, mergedSections));
+    return {
+      code: 0,
+      output: {
+        updated: true,
+        created: false,
+        candidateId: updateCandidateId,
+        path: knowledgePath(knowledgeRoot, 'candidates', `${updateCandidateId}.md`),
+        mergedFields: uniquePreserve(mergedFields),
+        issues: [],
+      },
+    };
+  }
   const duplicates = findCandidateDuplicates(context, payload);
-  const target = join(knowledgeAbs, 'candidates', `${payload.candidateId}.md`);
+  const target = join(candidateDir, `${payload.candidateId}.md`);
   if (duplicates.length > 0 && !payload.confirmDuplicate) {
     return {
       code: 3,
@@ -498,15 +1098,195 @@ export function createCandidate(input) {
   }
   const targetIssueResult = assertTargetsDoNotExist([{ abs: target, path: knowledgePath(knowledgeRoot, 'candidates', `${payload.candidateId}.md`) }]);
   if (targetIssueResult) return { code: 1, output: { issues: [targetIssueResult] } };
-  mkdirSync(join(knowledgeAbs, 'candidates'), { recursive: true });
+  mkdirSync(candidateDir, { recursive: true });
   let markdown = template.text;
   markdown = replaceLine(markdown, 'name', payload.name);
   markdown = replaceLine(markdown, 'keywords', formatInlineList(payload.keywords));
   markdown = replaceLine(markdown, 'possible_contexts', formatInlineList(payload.possibleContexts ?? payload.possible_contexts));
+  markdown = replaceLine(markdown, 'code_symbols', formatInlineList(payload.code_symbols ?? payload.codeSymbols));
+  markdown = replaceLine(markdown, 'identity_symbols', formatInlineList(payload.identity_symbols ?? payload.identitySymbols));
+  markdown = replaceLine(markdown, 'supporting_symbols', formatInlineList(payload.supporting_symbols ?? payload.supportingSymbols));
   markdown = replaceTemplateValue(markdown, 'Candidate Name', payload.name);
-  markdown = injectAfterHeading(markdown, '触发信号', payload.body);
+  const sections = candidateSectionsFromPayload({ ...payload, body: effectiveBody });
+  for (const [heading, content] of sections) markdown = injectAfterHeading(markdown, heading, content);
   writeMarkdown(target, markdown);
-  return { code: 0, output: { issues: [] } };
+  return { code: 0, output: { created: true, updated: false, candidateId: payload.candidateId, path: knowledgePath(knowledgeRoot, 'candidates', `${payload.candidateId}.md`), issues: [] } };
+}
+
+function duplicateDecisionFor(payload, duplicateOutput, decisions) {
+  const candidateId = payload.candidateId;
+  const updateExisting = decisions.updateExisting?.[candidateId];
+  if (updateExisting) {
+    return {
+      action: 'updateExisting',
+      payload: {
+        ...payload,
+        updateExisting: true,
+        updateCandidateId: updateExisting,
+        confirmDuplicate: true,
+      },
+      reason: `update ${updateExisting}`,
+    };
+  }
+  const accepted = new Set(normalizeList(decisions.acceptDistinct));
+  if (accepted.has(candidateId)) {
+    return {
+      action: 'acceptDistinct',
+      payload: { ...payload, confirmDuplicate: true },
+      reason: 'confirmed distinct despite duplicate hints',
+    };
+  }
+  return {
+    action: 'blocked',
+    payload,
+    reason: 'duplicate decision required',
+    duplicates: duplicateOutput.duplicates ?? [],
+  };
+}
+
+function planCandidateWrites(input, candidates, decisions, reduceOutput = {}) {
+  const results = [];
+  const confirmedDuplicates = [];
+  const blockedDuplicates = [];
+  const plans = [];
+  const batchDuplicates = findBatchDuplicatePlan(candidates);
+  const acceptedBatchDuplicates = new Map();
+  for (const duplicate of batchDuplicates) {
+    blockedDuplicates.push({
+      candidateId: duplicate.candidateIds.at(-1),
+      duplicates: duplicate.candidateIds.map((candidateId) => ({ candidateId, matchedFields: [duplicate.reason] })),
+      reason: duplicate.reason,
+      actionRequired: duplicate.actionRequired,
+      symbol: duplicate.symbol,
+    });
+  }
+  if (blockedDuplicates.length > 0) {
+    return { plans, results, confirmedDuplicates, blockedDuplicates };
+  }
+  const accepted = new Set(normalizeList(decisions.acceptDistinct));
+  const pairAccepted = new Set();
+  for (const duplicate of reduceOutput.possibleDuplicates ?? []) {
+    const leftId = duplicate.left?.candidateId;
+    const rightId = duplicate.right?.candidateId;
+    if (!rightId) continue;
+    if (accepted.has(rightId)) {
+      acceptedBatchDuplicates.set(rightId, [...(acceptedBatchDuplicates.get(rightId) ?? []), duplicate]);
+      if (leftId) pairAccepted.add(leftId);
+      pairAccepted.add(rightId);
+      continue;
+    }
+    blockedDuplicates.push({
+      candidateId: rightId,
+      duplicates: [duplicate.left, duplicate.right],
+      reason: 'duplicate decision required',
+      matchedFields: duplicate.matchedFields ?? [],
+    });
+    results.push({
+      candidateId: rightId,
+      action: 'blocked',
+      exitCode: 3,
+      output: {
+        code: 'candidate-duplicates-found',
+        duplicates: [duplicate.left, duplicate.right],
+      },
+    });
+  }
+  if (blockedDuplicates.length > 0) {
+    return { plans, results, confirmedDuplicates, blockedDuplicates };
+  }
+  for (const candidatePayload of candidates) {
+    const acceptedBatchDuplicate = acceptedBatchDuplicates.get(candidatePayload.candidateId);
+    if (acceptedBatchDuplicate) {
+      confirmedDuplicates.push({
+        candidateId: candidatePayload.candidateId,
+        action: 'acceptDistinct',
+        reason: decisions.reasons?.[candidatePayload.candidateId] ?? 'confirmed distinct despite batch duplicate hints',
+        duplicates: acceptedBatchDuplicate,
+      });
+      plans.push({
+        candidateId: candidatePayload.candidateId,
+        action: 'acceptDistinct',
+        payload: { ...candidatePayload, confirmDuplicate: true },
+      });
+      continue;
+    }
+    if (pairAccepted.has(candidatePayload.candidateId)) {
+      plans.push({
+        candidateId: candidatePayload.candidateId,
+        action: 'acceptDistinct',
+        payload: { ...candidatePayload, confirmDuplicate: true },
+      });
+      continue;
+    }
+    const duplicates = findCandidateDuplicates(resolveRepoContext(input), candidatePayload);
+    if (duplicates.length > 0) {
+      const duplicateOutput = { code: 'candidate-duplicates-found', duplicates };
+      const decision = duplicateDecisionFor(candidatePayload, duplicateOutput, decisions);
+      if (decision.action === 'blocked') {
+        blockedDuplicates.push({
+          candidateId: candidatePayload.candidateId,
+          duplicates: decision.duplicates,
+          reason: decision.reason,
+        });
+        results.push({ candidateId: candidatePayload.candidateId, action: decision.action, exitCode: 3, output: duplicateOutput });
+        continue;
+      }
+      confirmedDuplicates.push({
+        candidateId: candidatePayload.candidateId,
+        action: decision.action,
+        reason: decisions.reasons?.[candidatePayload.candidateId] ?? decision.reason,
+        duplicates,
+      });
+      plans.push({ candidateId: candidatePayload.candidateId, action: decision.action, payload: decision.payload });
+      continue;
+    }
+    plans.push({ candidateId: candidatePayload.candidateId, action: 'created', payload: candidatePayload });
+  }
+  return { plans, results, confirmedDuplicates, blockedDuplicates };
+}
+
+export function writeCandidates(input = {}) {
+  const payload = input.payload ?? {};
+  const reduceOutput = payload.reduceOutput ?? payload;
+  const candidates = [...(reduceOutput.writable ?? []), ...(reduceOutput.lowConfidence ?? [])];
+  if (!Array.isArray(candidates)) {
+    return { code: 2, output: { issues: [inputIssue('reduceOutput writable/lowConfidence must be arrays.', { field: 'payload.reduceOutput' })] } };
+  }
+  if (reduceOutput.gate && reduceOutput.gate !== 'ok') {
+    return { code: 3, output: { issues: [inputIssue('reduceOutput gate is not ok; refusing to write candidates.', { gate: reduceOutput.gate })], written: 0, blocked: reduceOutput.batchDuplicates?.length ?? 0, results: [], confirmedDuplicates: [], blockedDuplicates: reduceOutput.batchDuplicates ?? [] } };
+  }
+  const decisions = payload.duplicateDecisions ?? {};
+  const { plans, results, confirmedDuplicates, blockedDuplicates } = planCandidateWrites(input, candidates, decisions, reduceOutput);
+  if (blockedDuplicates.length > 0) {
+    return {
+      code: 3,
+      output: {
+        issues: [],
+        written: 0,
+        blocked: blockedDuplicates.length,
+        results,
+        confirmedDuplicates,
+        blockedDuplicates,
+      },
+    };
+  }
+  for (const plan of plans) {
+    const result = createCandidate({ ...input, payload: plan.payload });
+    results.push({ candidateId: plan.candidateId, action: result.code === 0 ? plan.action : 'failed', exitCode: result.code, output: result.output });
+  }
+  const failed = results.filter((result) => ![0, 1].includes(result.exitCode) && result.action !== 'blocked');
+  const code = blockedDuplicates.length > 0 ? 3 : (failed.length > 0 ? 1 : 0);
+  return {
+    code,
+    output: {
+      issues: failed.flatMap((result) => result.output?.issues ?? []),
+      written: results.filter((result) => result.exitCode === 0).length,
+      blocked: blockedDuplicates.length,
+      results,
+      confirmedDuplicates,
+      blockedDuplicates,
+    },
+  };
 }
 
 export function createContext(input) {
@@ -581,10 +1361,12 @@ export function createContext(input) {
   writeMarkdown(join(contextDir, 'README.md'), readmeMarkdown);
   const contextMapPath = join(knowledgeAbs, 'CONTEXT-MAP.md');
   const current = readFileSync(contextMapPath, 'utf8');
+  const responsibilitiesSummary = contextMapSummary(payload.responsibilities);
+  const nonResponsibilitiesSummary = contextMapSummary(payload.nonResponsibilities);
   const entry = `- ${payload.contextId}: ${payload.name} - ${payload.summary}
   - Path: contexts/${payload.contextId}/CONTEXT.md
-  - Responsibilities: ${payload.responsibilities}
-  - Non-responsibilities: ${payload.nonResponsibilities}`;
+  - Responsibilities: ${responsibilitiesSummary}
+  - Non-responsibilities: ${nonResponsibilitiesSummary}`;
   const withoutTemplate = current
     .replace(/- `?\{context-id\}`?: `?\{Context Name\}`? - `?\{one sentence summary\}`?\n  - Path: `contexts\/\{context-id\}\/CONTEXT\.md`\n  - Responsibilities: `?\{short responsibility summary\}`?\n  - Non-responsibilities: `?\{short non-responsibility summary\}`?/, entry)
     .replace(/\n- `?\{source-context\}`? -> `?\{target-context\}`?: `?\{relationship summary\}`?/g, '')
@@ -845,7 +1627,6 @@ export function createEvidence(input) {
   markdown = replaceLine(markdown, 'summary', payload.summary);
   markdown = replaceTemplateValue(markdown, 'Capability', payload.name);
   markdown = injectAfterHeading(markdown, '事实摘要', payload.body);
-  markdown = injectAfterHeading(markdown, '生成方式', sectionText(payload.generationMethod, payload.generation_evidence));
   markdown = injectAfterHeading(markdown, '入口路径', sectionText(payload.entryPaths, '本轮未记录具体入口路径；如需要可追溯代码事实，请补充文件路径和行号。'));
   markdown = injectEvidenceSection(markdown, payload.evidenceKind, '路由 / 接口', payload.routes);
   markdown = injectEvidenceSection(markdown, payload.evidenceKind, '调用关系', payload.callRelations);

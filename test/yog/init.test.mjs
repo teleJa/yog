@@ -43,6 +43,8 @@ test('init creates docs/knowledge skeleton config and managed blocks', () => {
   assert.equal(output.nextSteps[1].status, 'gated');
   assert.equal(existsSync(join(repoRoot, 'docs/knowledge/README.md')), true);
   assert.equal(existsSync(join(repoRoot, 'docs/knowledge/BUILD-PLAN.md')), false);
+  assert.equal(existsSync(join(repoRoot, 'docs/knowledge/business-flows/README.md')), true);
+  assert.equal(existsSync(join(repoRoot, 'docs/knowledge/templates/business-flow.md')), true);
   assert.equal(existsSync(join(repoRoot, 'docs/knowledge/templates/evidence.md')), true);
   assert.equal(existsSync(join(repoRoot, '.yog/config.json')), true);
   const agents = readFileSync(join(repoRoot, 'AGENTS.md'), 'utf8');
@@ -56,12 +58,14 @@ test('init creates docs/knowledge skeleton config and managed blocks', () => {
   const knowledgeReadme = readFileSync(join(repoRoot, 'docs/knowledge/README.md'), 'utf8');
   const knowledgeAgents = readFileSync(join(repoRoot, 'docs/knowledge/AGENTS.md'), 'utf8');
   assert.match(knowledgeReadme, /Automatic candidate discovery/);
+  assert.match(knowledgeReadme, /business-flows\/\*\.md/);
   assert.match(knowledgeReadme, /Serena available/);
   assert.match(knowledgeReadme, /CodeGraph initialized/);
   assert.match(knowledgeReadme, /more than 10 candidates/);
   assert.match(knowledgeReadme, /Minimum migration package/);
   assert.doesNotMatch(knowledgeReadme, /docs\/knowledge\/BUILD-PLAN\.md/);
   assert.match(knowledgeAgents, /Yog plugin skill as the complete specification/);
+  assert.match(knowledgeAgents, /business-flows\/\*\.md/);
   assert.match(knowledgeAgents, /ask Yog to run `install-hooks`/);
   assert.match(knowledgeAgents, /Automatic `discover-candidates` requires both Serena and CodeGraph/);
   assert.match(knowledgeAgents, /Do not fall back to filename-only or `rg`-only discovery/);
@@ -159,10 +163,11 @@ test('upgrade-guidance refreshes a stale root managed block and preserves surrou
   assert.equal(apply.applied, true);
   assert.equal(apply.changed.includes('AGENTS.md'), true);
   const upgraded = readFileSync(join(repoRoot, 'AGENTS.md'), 'utf8');
-  assert.match(upgraded, /first read docs\/knowledge\/CONTEXT-MAP\.md/);
+  assert.match(upgraded, /first read docs\/knowledge\/index\.json, docs\/knowledge\/INDEX\.md, and docs\/knowledge\/CONTEXT-MAP\.md/);
+  assert.match(upgraded, /matching business-flow entry/);
   assert.match(upgraded, /ask Yog to run install-hooks/);
   assert.match(upgraded, /After a change lands, re-check the evidence documents/);
-  assert.doesNotMatch(upgraded, /read docs\/knowledge\/index\.json/);
+  assert.doesNotMatch(upgraded, /Before answering business, architecture, feature, or implementation questions/);
   assert.match(upgraded, /# Team Root Guidance/);
   assert.match(upgraded, /# Team footer notes/);
 });

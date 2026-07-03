@@ -43,6 +43,45 @@ test('match-scope returns context matches and does not read candidates by defaul
   assert.equal(output.matches.some((match) => match.type === 'candidate'), false);
 });
 
+test('match-scope prefers matching business-flow as operation overview', () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), 'yog-router-flow-'));
+  mkdirSync(join(repoRoot, '.git'));
+  run(repoRoot, 'init');
+  run(repoRoot, 'create-context', {
+    contextId: 'order',
+    name: 'Order',
+    summary: 'Order lifecycle and refund operation overview.',
+    responsibilities: 'Own order lifecycle language.',
+    nonResponsibilities: 'Payment settlement internals.',
+    body: 'Order context covers order creation, cancellation, refund handoff, and after-sales vocabulary.',
+  });
+  mkdirSync(join(repoRoot, 'docs/knowledge/business-flows'), { recursive: true });
+  writeFileSync(join(repoRoot, 'docs/knowledge/business-flows/order-operation.md'), `---
+flow_id: order-operation
+name: Order Operation
+summary: Order lifecycle and refund operation overview.
+primary_contexts: [order]
+related_contexts: []
+keywords: [order, refund, operation]
+status: draft
+updated_at: ""
+---
+
+# Order Operation
+
+## 业务范围
+
+Order operation connects customer order lifecycle and refund handling.
+`);
+  run(repoRoot, 'sync');
+  const result = run(repoRoot, 'match-scope', { query: 'order refund operation' });
+  assert.equal(result.status, 0);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.issues.length, 0);
+  assert.equal(output.matches[0].type, 'business-flow');
+  assert.equal(output.matches[0].path, 'docs/knowledge/business-flows/order-operation.md');
+});
+
 test('match-scope exits non-zero when generated indexes are missing', () => {
   const repoRoot = mkdtempSync(join(tmpdir(), 'yog-router-missing-'));
   mkdirSync(join(repoRoot, '.git'));

@@ -11,8 +11,6 @@ status: draft
 
 # {Capability} Evidence
 
-## 生成方式
-
 ## 事实摘要
 
 ## 入口路径

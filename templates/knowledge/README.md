@@ -15,6 +15,9 @@ docs/knowledge/
   CONTEXT-MAP.md
   INDEX.md
   index.json
+  business-flows/
+    README.md
+    <business-flow-id>.md
   changes/
     README.md
     <timestamp>-change.md
@@ -47,6 +50,7 @@ docs/knowledge/
     context-readme.md
     capability.md
     evidence.md
+    business-flow.md
     candidate.md
     adr.md
     change.md
@@ -57,6 +61,7 @@ docs/knowledge/
 ## Document Types
 
 - `CONTEXT-MAP.md`: confirmed business contexts and their relationships.
+- `business-flows/*.md`: end-to-end business operation overviews that connect multiple contexts into a readable flow.
 - `INDEX.md`: generated human-readable index.
 - `index.json`: generated machine-readable index for agent retrieval.
 - `changes/*.md`: generated or semi-generated change impact reports; not authoritative routing documents.
@@ -65,6 +70,7 @@ docs/knowledge/
 - `contexts/<context-id>/README.md`: context overview and capability list.
 - `capabilities/*.md`: business capability boundaries, workflows, design intent, code evidence links, verification methods, and open questions.
 - `evidence/*.md`: generated or semi-automated implementation facts such as routes, call graphs, tables, messages, and entry points.
+- `business-flows/*.md`: business-wide overview documents for humans and agents. Use them before reading individual contexts when a request maps to a named business operation.
 
 A formal context requires both a confirmed `CONTEXT-MAP.md` entry and an existing `contexts/<context-id>/CONTEXT.md` with real business-language content. A directory alone is not a formal context.
 
@@ -103,7 +109,7 @@ If discovery finds more than 10 candidates, stop before writing and ask the user
 
 ## Minimal Build Flow
 
-1. Route: check `index.json`, `INDEX.md`, and `CONTEXT-MAP.md` to find an existing context or capability. Candidate documents are checked only when the user explicitly asks to create, review, update, or promote candidates.
+1. Route: check `index.json`, `INDEX.md`, business flow matches, and `CONTEXT-MAP.md` to find an existing business flow, context, or capability. Candidate documents are checked only when the user explicitly asks to create, review, update, or promote candidates.
 2. Classify: update an existing capability, create a capability under an existing context, create or update a candidate when the boundary is unclear, or create an ADR for hard trade-offs.
 3. Gather evidence: use CodeGraph, repository scans, archived PRDs, or verification records to generate or refresh evidence.
 4. Write: keep `CONTEXT.md` for confirmed terms, capability documents for durable business knowledge, evidence documents for code facts, and ADRs for long-term trade-offs.
@@ -115,7 +121,7 @@ Agents use the knowledge base for initial business routing and intent:
 
 1. Extract business terms, identifiers, paths, interfaces, tables, and messages from the request.
 2. Search frontmatter, titles, and `CONTEXT-MAP.md`.
-3. Read the matching `CONTEXT.md`, capability document, and related ADRs.
+3. If a matching business flow exists, read it first to understand the end-to-end operation and recommended context order. Then read the matching `CONTEXT.md`, capability document, and related ADRs.
 4. Verify current implementation facts with CodeGraph, repository scans, and tests.
 
 If code facts conflict with the knowledge base, current code facts drive the task. Recommend marking the knowledge document `stale` or `needs-review`; modify frontmatter only after user confirmation or an explicit apply command.
@@ -149,7 +155,7 @@ Generated indexes are committed with the knowledge base. After changing source M
 
 Refresh them through the Yog skill, which calls plugin-packaged scripts. Target repositories do not store Yog executable scripts.
 
-The global `docs/knowledge/index.json` is a lightweight routing index. It lists confirmed contexts and ADRs, but it does not include candidate, capability, or evidence entries. The global `INDEX.md` is only the human-readable mirror of this lightweight global index.
+The global `docs/knowledge/index.json` is a lightweight routing index. It lists business flows, confirmed contexts, and ADRs, but it does not include candidate, capability, or evidence entries. The global `INDEX.md` is only the human-readable mirror of this lightweight global index.
 
 Each context has its own generated `contexts/<context-id>/index.json` with `kind: "context"`. Context indexes contain local `capability`, `evidence`, and non-countable `adr-link` entries. Context index entries are flat `entries[]`; do not nest evidence under capability objects.
 
@@ -167,6 +173,7 @@ The first version does not generate context-level `INDEX.md` files.
 
 Global index sources include:
 
+- `business-flows/*.md`
 - `contexts/**/capabilities/*.md`
 - `adr/*.md`
 

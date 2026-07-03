@@ -1,3 +1,4 @@
+import { writeSync } from 'node:fs';
 import { ISSUE_ORDER } from './constants.mjs';
 
 export function sortIssues(issues) {
@@ -12,7 +13,18 @@ export function sortIssues(issues) {
 }
 
 export function writeJson(value) {
-  process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+  const buffer = Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
+  let offset = 0;
+  const waitBuffer = new SharedArrayBuffer(4);
+  const waitView = new Int32Array(waitBuffer);
+  while (offset < buffer.length) {
+    try {
+      offset += writeSync(process.stdout.fd, buffer, offset, buffer.length - offset);
+    } catch (error) {
+      if (error?.code !== 'EAGAIN') throw error;
+      Atomics.wait(waitView, 0, 0, 10);
+    }
+  }
 }
 
 export async function readStdinJson() {

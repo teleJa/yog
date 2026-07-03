@@ -161,7 +161,7 @@ function missingSectionIssues(path, evidenceKind, text) {
   const sections = parseMarkdownSections(text);
   const issues = [];
   const p1Required = ['事实摘要'];
-  const p2Recommended = ['生成方式', '入口路径', '限制与疑点'];
+  const p2Recommended = ['入口路径', '限制与疑点'];
   const kindRequired = new Map([
     ['routes', ['路由 / 接口']],
     ['call-flow', ['调用关系']],

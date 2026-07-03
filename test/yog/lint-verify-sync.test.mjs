@@ -206,8 +206,6 @@ summary: HTTP routes that enter the refund workflow.
 
 # Refund routes Evidence
 
-## 生成方式
-
 ## 事实摘要
 
 Refund route facts are known but structured route section is intentionally empty.
@@ -233,7 +231,7 @@ Refund route facts are known but structured route section is intentionally empty
   );
   assert.deepEqual(
     issues.filter((item) => item.message === 'Evidence recommended section is empty.').map((item) => item.details.section).sort(),
-    ['入口路径', '生成方式', '限制与疑点'].sort(),
+    ['入口路径', '限制与疑点'].sort(),
   );
 });
 

@@ -68,6 +68,60 @@ test('build-index writes global and context indexes with expected entries', () =
   assert.equal(context.entries[0].evidenceCount, 1);
 });
 
+test('build-index writes business-flow entries before context entries', () => {
+  const repoRoot = repoWithKnowledge();
+  mkdirSync(join(repoRoot, 'docs/knowledge/business-flows'), { recursive: true });
+  writeFileSync(join(repoRoot, 'docs/knowledge/business-flows/order-operation.md'), `---
+flow_id: order-operation
+name: Order Operation
+summary: Order lifecycle and refund operation overview.
+primary_contexts: [order]
+related_contexts: []
+keywords: [order, refund, operation]
+status: draft
+updated_at: ""
+---
+
+# Order Operation
+
+## 业务范围
+
+Order operation connects customer order lifecycle and refund handling.
+`);
+  const result = run(repoRoot, 'build-index');
+  assert.equal(result.status, 0);
+  const global = JSON.parse(readFileSync(join(repoRoot, 'docs/knowledge/index.json'), 'utf8'));
+  assert.deepEqual(global.entries.map((entry) => entry.type), ['business-flow', 'context']);
+  assert.equal(global.entries[0].path, 'docs/knowledge/business-flows/order-operation.md');
+  assert.deepEqual(global.entries[0].primaryContexts, ['order']);
+});
+
+test('build-index fails when business-flow references a missing context', () => {
+  const repoRoot = repoWithKnowledge();
+  mkdirSync(join(repoRoot, 'docs/knowledge/business-flows'), { recursive: true });
+  writeFileSync(join(repoRoot, 'docs/knowledge/business-flows/order-operation.md'), `---
+flow_id: order-operation
+name: Order Operation
+summary: Order lifecycle and refund operation overview.
+primary_contexts: [missing-context]
+related_contexts: []
+keywords: [order, refund, operation]
+status: draft
+updated_at: ""
+---
+
+# Order Operation
+
+## 业务范围
+
+Order operation connects customer order lifecycle and refund handling.
+`);
+  const result = run(repoRoot, 'build-index');
+  assert.equal(result.status, 1);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.issues[0].message, 'Business flow references an unknown context.');
+});
+
 test('build-index creates global ADR entries and context adr-link entries', () => {
   const repoRoot = repoWithKnowledge();
   mkdirSync(join(repoRoot, 'docs/knowledge/adr'), { recursive: true });

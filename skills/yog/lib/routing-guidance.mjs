@@ -4,14 +4,14 @@
 
 // Two-sentence core instruction reused verbatim inside the managed block's first rules.
 export function routingCoreInstruction(knowledgeRoot = 'docs/knowledge') {
-  return `Before requirement analysis, solution design, interface changes, or business-rule judgments, first read ${knowledgeRoot}/CONTEXT-MAP.md.
-- Select relevant contexts yourself by matching the current request against each context's summary, responsibilities, and non-responsibilities. Then read the full CONTEXT.md and related capability and evidence documents before designing or changing behavior.`;
+  return `Before requirement analysis, solution design, interface changes, or business-rule judgments, first read ${knowledgeRoot}/index.json, ${knowledgeRoot}/INDEX.md, and ${knowledgeRoot}/CONTEXT-MAP.md.
+- If a matching business-flow entry exists, read it first as the end-to-end overview. Then select relevant contexts and read their CONTEXT.md, capability, and evidence documents before designing or changing behavior.`;
 }
 
 // Compact instruction + routing-table pointer injected every turn by the hook.
 // Kept short on purpose: the hook fires on every prompt, so token cost matters.
 export function hookAdditionalContext(knowledgeRoot = 'docs/knowledge') {
-  return `Yog knowledge base: before requirement analysis, solution design, interface changes, or business-rule judgments, first read ${knowledgeRoot}/CONTEXT-MAP.md, select relevant contexts by matching the request against each context's summary, responsibilities, and non-responsibilities, then read the full CONTEXT.md and related capability and evidence documents before designing or changing behavior. If nothing matches, use ${knowledgeRoot}/INDEX.md for routing.`;
+  return `Yog knowledge base: before business, design, interface, or implementation work, route through ${knowledgeRoot}/index.json, ${knowledgeRoot}/INDEX.md, and ${knowledgeRoot}/CONTEXT-MAP.md. If a matching business-flow exists, read it first as the end-to-end overview, then read the relevant context/capability/evidence documents.`;
 }
 
 // Notice injected when the repository has no initialized Yog knowledge base.

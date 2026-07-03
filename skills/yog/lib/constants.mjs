@@ -8,5 +8,6 @@ export const ISSUE_ORDER = new Map([
 ]);
 export const EVIDENCE_KINDS = ['routes', 'call-flow', 'data', 'prd', 'tests', 'ui', 'ops'];
 export const ID_PATTERN = /^[a-z][a-z0-9-]*$/;
+export const CODE_SYMBOL_PATTERN = /^[A-Z][$A-Za-z0-9_]*(?:#[A-Za-z_$][$A-Za-z0-9_]*)?$/;
 export const MANAGED_BLOCK_START = '<!-- YOG MANAGED BLOCK START -->';
 export const MANAGED_BLOCK_END = '<!-- YOG MANAGED BLOCK END -->';

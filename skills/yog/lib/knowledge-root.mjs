@@ -41,6 +41,10 @@ export function contextPath(knowledgeRoot, contextId, ...parts) {
   return knowledgePath(knowledgeRoot, 'contexts', contextId, ...parts);
 }
 
+export function businessFlowPath(knowledgeRoot, ...parts) {
+  return knowledgePath(knowledgeRoot, 'business-flows', ...parts);
+}
+
 export function adrPath(knowledgeRoot, ...parts) {
   return knowledgePath(knowledgeRoot, 'adr', ...parts);
 }

@@ -3,6 +3,9 @@ candidate: true
 name: ""
 keywords: []
 possible_contexts: []
+code_symbols: []
+identity_symbols: []
+supporting_symbols: []
 evidence: []
 status: needs-review
 promoted_to: ""

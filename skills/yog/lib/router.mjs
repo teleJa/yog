@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { hasRealBodyContent, hasTemplatePlaceholder } from './markdown.mjs';
-import { adrPath, contextPath, knowledgePath, resolveRepoContext } from './knowledge-root.mjs';
+import { adrPath, businessFlowPath, contextPath, knowledgePath, resolveRepoContext } from './knowledge-root.mjs';
 
 function score(entry, queryTerms) {
   const haystack = [
@@ -67,6 +67,13 @@ function validateContextCandidate(repoRoot, knowledgeRoot, entry) {
   return null;
 }
 
+function validateBusinessFlowCandidate(repoRoot, knowledgeRoot, entry) {
+  if (!entry.path) return issue('Business flow path is missing.', knowledgePath(knowledgeRoot, 'index.json'), { flow: entry.flow });
+  const prefix = businessFlowPath(knowledgeRoot, '');
+  if (!entry.path.startsWith(prefix)) return issue('Business flow path is invalid.', knowledgePath(knowledgeRoot, 'index.json'), { path: entry.path });
+  return sourceIssue(repoRoot, entry.path, 'Business flow source');
+}
+
 export function matchScope(input = {}) {
   const { repoRoot, knowledgeRoot, knowledgeAbs } = resolveRepoContext(input);
   const query = input.payload?.query ?? '';
@@ -84,6 +91,10 @@ export function matchScope(input = {}) {
   for (const entry of global.entries) {
     const entryScore = score(entry, queryTerms);
     if (entryScore > 0) matches.push({ ...entry, score: entryScore });
+    if (entry.type === 'business-flow') {
+      const flowIssue = validateBusinessFlowCandidate(repoRoot, knowledgeRoot, entry);
+      if (flowIssue) return { query, matches: [], issues: [flowIssue] };
+    }
     if (entry.type === 'context') {
       const contextIssue = validateContextCandidate(repoRoot, knowledgeRoot, entry);
       if (contextIssue) return { query, matches: [], issues: [contextIssue] };
@@ -94,6 +105,11 @@ export function matchScope(input = {}) {
       }
     }
   }
-  matches.sort((left, right) => right.score - left.score || left.path.localeCompare(right.path));
+  const typeRank = new Map([['business-flow', 0], ['context', 1], ['capability', 2], ['evidence', 3], ['adr', 4], ['adr-link', 5]]);
+  matches.sort((left, right) => (
+    right.score - left.score
+    || (typeRank.get(left.type) ?? 99) - (typeRank.get(right.type) ?? 99)
+    || left.path.localeCompare(right.path)
+  ));
   return { query, matches, issues: [] };
 }

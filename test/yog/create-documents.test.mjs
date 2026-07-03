@@ -111,6 +111,78 @@ test('create-candidate writes optional duplicate-confirmed fields', () => {
   assert.match(text, /possible_contexts: \[order\]/);
 });
 
+test('create-candidate fills candidate sections and writes code symbols', () => {
+  const repoRoot = tempRepo();
+  const result = runScript(repoRoot, 'create-candidate', {
+    candidateId: 'course-link',
+    name: 'Course Link',
+    summary: 'Course link boundary candidate.',
+    keywords: ['course'],
+    possibleContexts: ['course-live'],
+    code_symbols: ['CourseLinkController#createCourseLink'],
+    identity_symbols: ['CourseLinkController#createCourseLink'],
+    supporting_symbols: ['CourseLinkService#createFeiShuCourseLink'],
+    body: '- controller-route-agent: Course link route signal.',
+    businessMeaning: '负责课程直播链接入口识别。',
+    evidence: '- symbol: CourseLinkController#createCourseLink',
+    openQuestions: '- 需确认是否覆盖群链接。',
+  });
+  assert.equal(result.status, 0);
+  const text = readFileSync(join(repoRoot, 'docs/knowledge/candidates/course-link.md'), 'utf8');
+  assert.match(text, /code_symbols: \[CourseLinkController#createCourseLink\]/);
+  assert.match(text, /identity_symbols: \[CourseLinkController#createCourseLink\]/);
+  assert.match(text, /supporting_symbols: \[CourseLinkService#createFeiShuCourseLink\]/);
+  assert.match(text, /## 触发信号\n\n- controller-route-agent: Course link route signal\./);
+  assert.match(text, /## 可能的业务含义\n\n负责课程直播链接入口识别。/);
+  assert.match(text, /## 可能归属的上下文\n\n- course-live/);
+  assert.match(text, /## 相关证据\n\n- symbol: CourseLinkController#createCourseLink/);
+  assert.match(text, /## 为什么暂不创建正式 Context\n\nneeds-review/);
+  assert.match(text, /## 需要确认的问题\n\n- 需确认是否覆盖群链接。/);
+  assert.match(text, /## 处理结果\n\n待 review \/ promote/);
+});
+
+test('create-candidate updates an existing duplicate candidate', () => {
+  const repoRoot = tempRepo();
+  assert.equal(runScript(repoRoot, 'create-candidate', {
+    candidateId: 'course-link-old',
+    name: 'Course Link Old',
+    summary: 'Course link boundary candidate.',
+    keywords: ['course'],
+    possible_contexts: ['course-live'],
+    code_symbols: ['CourseLinkController#createCourseLink'],
+    body: '- controller-route-agent: Existing route signal.',
+    evidence: '- symbol: CourseLinkController#createCourseLink',
+  }).status, 0);
+  const result = runScript(repoRoot, 'create-candidate', {
+    updateExisting: true,
+    updateCandidateId: 'course-link-old',
+    confirmDuplicate: true,
+    candidateId: 'course-link-new',
+    name: 'Course Link New',
+    summary: 'Course link boundary candidate.',
+    keywords: ['feishu'],
+    possible_contexts: ['feishu-integration'],
+    code_symbols: ['CourseLinkService#createFeiShuCourseLink'],
+    identity_symbols: ['CourseLinkService#createFeiShuCourseLink'],
+    supporting_symbols: ['CourseLinkMapper#save'],
+    body: '- service-flow-agent: New service flow signal.',
+    evidence: '- symbol: CourseLinkService#createFeiShuCourseLink',
+  });
+  assert.equal(result.status, 0);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.updated, true);
+  assert.equal(output.created, false);
+  assert.equal(output.candidateId, 'course-link-old');
+  const text = readFileSync(join(repoRoot, 'docs/knowledge/candidates/course-link-old.md'), 'utf8');
+  assert.match(text, /keywords: \[course, feishu\]/);
+  assert.match(text, /possible_contexts: \[course-live, feishu-integration\]/);
+  assert.match(text, /code_symbols: \[CourseLinkController#createCourseLink, CourseLinkService#createFeiShuCourseLink\]/);
+  assert.match(text, /identity_symbols: \[CourseLinkService#createFeiShuCourseLink\]/);
+  assert.match(text, /supporting_symbols: \[CourseLinkMapper#save\]/);
+  assert.match(text, /Existing route signal/);
+  assert.match(text, /New service flow signal/);
+});
+
 test('create-candidate confirmation does not overwrite an existing slug', () => {
   const repoRoot = tempRepo();
   assert.equal(runScript(repoRoot, 'create-candidate', {
@@ -156,6 +228,24 @@ test('create-context creates formal context and removes template context item', 
   const readmeText = readFileSync(join(repoRoot, 'docs/knowledge/contexts/order/README.md'), 'utf8');
   assert.match(readmeText, /## 业务边界\n\n负责：Own order lifecycle language\./);
   assert.match(readmeText, /## 主要能力\n\n暂无已确认主要能力/);
+});
+
+test('create-context writes multiline boundaries as single-line CONTEXT-MAP summaries', () => {
+  const repoRoot = tempRepo();
+  const result = runScript(repoRoot, 'create-context', {
+    contextId: 'course-link',
+    name: 'Course Link',
+    summary: 'Course link lifecycle and cache boundary.',
+    responsibilities: '- Create course links\n- Reuse Feishu link cache\n- Separate personal and group links',
+    nonResponsibilities: '- Course content authoring\n- Feishu platform account lifecycle',
+    body: 'Course link context covers link creation, cache reuse, and send-scope vocabulary.',
+  });
+  assert.equal(result.status, 0);
+  const contextMap = readFileSync(join(repoRoot, 'docs/knowledge/CONTEXT-MAP.md'), 'utf8');
+  assert.match(contextMap, /  - Responsibilities: Create course links; Reuse Feishu link cache; Separate personal and group links\n/);
+  assert.match(contextMap, /  - Non-responsibilities: Course content authoring; Feishu platform account lifecycle\n/);
+  assert.doesNotMatch(contextMap, /\n- Reuse Feishu link cache\n/);
+  assert.equal(runScript(repoRoot, 'sync', {}).status, 0);
 });
 
 test('create-context does not overwrite existing context source files', () => {
@@ -475,7 +565,8 @@ test('create-capability and create-evidence require existing parents', () => {
   assert.match(text, /name: Refund routes/);
   assert.match(text, /summary: HTTP routes that enter the refund workflow\./);
   assert.doesNotMatch(text, /evidence_kind.*must match/);
-  assert.match(text, /## 生成方式\n\nManual route inspection\./);
+  assert.doesNotMatch(text, /## 生成方式/);
+  assert.match(text, /generation_evidence: Reviewed route files in current repository\./);
   assert.match(text, /## 入口路径\n\n- src\/refund\/controller\.js/);
   assert.match(text, /## 路由 \/ 接口\n\n- POST \/refunds/);
   assert.match(text, /## 调用关系\n\n- RefundController -> RefundService/);
@@ -518,7 +609,8 @@ test('create-evidence fills non-applicable sections with explicit fallback text'
   assert.equal(evidence.status, 0);
   const text = readFileSync(join(repoRoot, 'docs/knowledge/contexts/order/evidence/refund-data.md'), 'utf8');
   assert.doesNotMatch(text, /evidence_kind.*must match/);
-  assert.match(text, /## 生成方式\n\nReviewed data model files\./);
+  assert.doesNotMatch(text, /## 生成方式/);
+  assert.match(text, /generation_evidence: Reviewed data model files\./);
   assert.match(text, /## 入口路径\n\n本轮未记录具体入口路径/);
   assert.match(text, /## 路由 \/ 接口\n\n本证据类型未覆盖路由或接口/);
   assert.match(text, /## 调用关系\n\n本证据类型未覆盖调用关系/);
