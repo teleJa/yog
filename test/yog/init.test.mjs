@@ -84,6 +84,15 @@ test('init can record selected tool configuration without requiring tools for in
   assert.deepEqual(config.codeFactProvider, { type: 'none', status: 'not-configured' });
 });
 
+test('init defaults to Yog code fact tools when configuration is omitted', () => {
+  const repoRoot = tempRepo();
+  const result = runInit(repoRoot);
+  assert.equal(result.status, 0);
+  const config = JSON.parse(readFileSync(join(repoRoot, '.yog/config.json'), 'utf8'));
+  assert.deepEqual(config.serena, { enabled: true });
+  assert.deepEqual(config.codeFactProvider, { type: 'codegraph', status: 'configured' });
+});
+
 test('init replaces only the managed block and preserves existing file content', () => {
   const repoRoot = tempRepo();
   writeFileSync(join(repoRoot, 'AGENTS.md'), 'team agent rules\n');

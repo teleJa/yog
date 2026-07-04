@@ -44,8 +44,8 @@ export function initKnowledgeBase(input = {}) {
   const merged = mergeConfig(existing, {
     schemaVersion: 1,
     knowledgeRoot: context.knowledgeRoot,
-    serena: input.payload?.serena ?? existing.serena ?? { enabled: false },
-    codeFactProvider: input.payload?.codeFactProvider ?? existing.codeFactProvider ?? { type: 'none', status: 'not-configured' },
+    serena: input.payload?.serena ?? existing.serena ?? { enabled: true },
+    codeFactProvider: input.payload?.codeFactProvider ?? existing.codeFactProvider ?? { type: 'codegraph', status: 'configured' },
   });
   writeConfig(context.repoRoot, merged);
   writeRootManagedBlocks(context.repoRoot, context.knowledgeRoot);
