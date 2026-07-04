@@ -54,6 +54,25 @@ test('skill documents candidate promotion requires real capability and evidence'
   assert.match(skill, /If `docsCount` is 0, treat the promotion as failed/);
 });
 
+test('skill documents subagent timeout discipline', () => {
+  assert.match(skill, /Subagent Timeout Discipline/);
+  assert.match(skill, /explicit timeout discipline before fan-out begins/);
+  assert.match(skill, /10-15 minutes for code discovery lenses/);
+  assert.match(skill, /5-10 minutes for semantic recall probes/);
+  assert.match(skill, /Do not block the critical path on closing old or completed subagents/);
+  assert.match(skill, /Never bulk-close many subagents in parallel/);
+  assert.match(skill, /timed_out: true/);
+});
+
+test('skill documents post-generation overlap calibration', () => {
+  assert.match(skill, /Post-generation Calibration/);
+  assert.match(skill, /agent semantic recall check/);
+  assert.match(skill, /Overlap is not an error by itself/);
+  assert.match(skill, /Only the user can decide/);
+  assert.match(skill, /keep separate and add explicit `CONTEXT-MAP\.md` relationship/);
+  assert.match(skill, /Apply changes to `CONTEXT-MAP\.md`/);
+});
+
 test('skill does not expose user-visible commands or MCP server instructions', () => {
   assert.doesNotMatch(skill, /mcpServers/);
   assert.doesNotMatch(skill, /commands\//);

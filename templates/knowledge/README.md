@@ -107,6 +107,17 @@ When both tools are available, the agent may run `discover-candidates` by combin
 
 If discovery finds more than 10 candidates, stop before writing and ask the user to narrow the scope. Duplicate candidates must not be overwritten or merged automatically.
 
+### Subagent Timeout Discipline
+
+When agents use subagents for candidate discovery, promotion evidence gathering, semantic recall, or overlap calibration, each subagent task must have an explicit timeout plan.
+
+- Give each subagent a bounded task and state the expected deadline in its prompt.
+- When waiting for subagents, use an explicit timeout when the orchestration tool supports one. Use 10-15 minutes for discovery lenses and 5-10 minutes for semantic recall probes unless the user asks otherwise.
+- If a subagent times out, record `timed_out: true`, the agent role, elapsed time, and any partial output. Do not silently count it as a failed recall or a successful scan.
+- Do not block the main workflow on closing old or completed subagents. If capacity is exhausted, reuse an existing idle/completed agent with a fresh interrupting task, reduce fan-out, or continue locally with a lower-confidence note.
+- Never bulk-close many subagents in parallel as a generation or validation gate.
+- If too few subagent results return before timeout, report the missing coverage instead of fabricating the missing lens or recall result.
+
 ## Minimal Build Flow
 
 1. Route: check `index.json`, `INDEX.md`, business flow matches, and `CONTEXT-MAP.md` to find an existing business flow, context, or capability. Candidate documents are checked only when the user explicitly asks to create, review, update, or promote candidates.
@@ -125,6 +136,24 @@ Agents use the knowledge base for initial business routing and intent:
 4. Verify current implementation facts with CodeGraph, repository scans, and tests.
 
 If code facts conflict with the knowledge base, current code facts drive the task. Recommend marking the knowledge document `stale` or `needs-review`; modify frontmatter only after user confirmation or an explicit apply command.
+
+## Post-generation Calibration
+
+After generating or promoting multiple contexts, agents should run an agent semantic recall check and prepare an overlap calibration report when there are overlap signals. Overlap is not an error by itself; it is a calibration candidate.
+
+Agents must not decide context boundaries by themselves. Only the user can decide whether suspected overlap should become a merge, split, rename, explicit relationship, or no-op. The report should provide evidence and options, not a forced conclusion.
+
+Overlap signals include shared business terms, candidate duplicate hints, agent semantic recall results that reasonably select multiple contexts, recurring business-flow adjacency, and missing `CONTEXT-MAP.md` relationships that make agents infer whether contexts are overlapping or upstream/downstream.
+
+For each suspected overlap, report the context ids, triggering signals, example user queries, affected business-flow sections, and decision options:
+
+- keep separate and add explicit `CONTEXT-MAP.md` relationship;
+- merge contexts;
+- rename or rewrite responsibilities/non-responsibilities;
+- mark as `needs-review` and defer;
+- gather more code or business evidence before deciding.
+
+Apply changes to `CONTEXT-MAP.md`, context summaries, responsibilities, non-responsibilities, keywords, or business-flow reading order only after the user makes a decision.
 
 ## Status And Confidence
 

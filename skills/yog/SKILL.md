@@ -90,6 +90,17 @@ Each subagent final message must be a JSON object with `agent`, `scan_scope`, `t
 
 `reduce-candidates.mjs` is the only allowed aggregation path. Automatic JOIN uses only canonical `identity_symbols` intersections. `candidateId`, `name`, `keywords`, and `possible_contexts` similarities must only appear as `possibleDuplicates` hints; they must not merge candidates. Two candidates from the same subagent are not automatically JOINed even when they share an identity symbol, unless both explicitly set `allow_same_agent_join: true`; otherwise the reduce output records a `joinConflicts[]` entry for review. The reduce report must include `raw`, `afterFormat`, `clusters`, `writable`, `lowConfidence`, `possibleDuplicates`, `joinConflicts`, `rejected`, and `diskDuplicates` statistics, plus each written candidate's hit agents, canonical identity/supporting/code symbols, evidence sources, and normalized confidence. Normalized confidence is a review priority only; `lowConfidence[]` candidates are still written to the candidate review area.
 
+### Subagent Timeout Discipline
+
+Any Yog workflow that starts subagents must include an explicit timeout discipline before fan-out begins. This applies to discover lenses, promotion evidence gathering, semantic recall tests, and post-generation calibration.
+
+- Give each subagent a bounded task and state the expected deadline in its prompt.
+- When waiting for subagents, use an explicit timeout when the orchestration tool supports one. Recommended defaults are 10-15 minutes for code discovery lenses and 5-10 minutes for semantic recall probes.
+- If a subagent times out, record `timed_out: true`, the agent role, elapsed time, and any partial output. Do not silently count it as a failed recall or a successful scan.
+- Do not block the critical path on closing old or completed subagents. If subagent capacity is exhausted, prefer reusing an existing idle/completed agent with a fresh interrupting task, reduce fan-out, or continue the remaining work locally.
+- Never bulk-close many subagents in parallel as part of the main Yog workflow. Closing agents is cleanup, not a generation or validation gate.
+- If too few subagent results return before timeout, either continue with a clearly marked reduced-confidence result or stop and report the missing coverage; do not fabricate the missing lens or recall result.
+
 Candidate discovery may automatically write `needs-review` documents under `docs/knowledge/candidates/`. These candidates never enter generated routing indexes. If discovery finds more than 10 candidates, stop before writing and ask the user to narrow the scope. If `write-candidates.mjs` reports duplicate candidates, do not silently bypass it; provide explicit `payload.duplicateDecisions.acceptDistinct` for candidates confirmed to be separate business objects, or `payload.duplicateDecisions.updateExisting` to update an existing candidate. The write result records `confirmedDuplicates[]` for audit.
 
 Each auto-discovered candidate body must include:
@@ -112,11 +123,37 @@ For large repositories, spawn focused subagents in parallel when useful:
 - one subagent uses Serena to locate symbols, entry files, and code ownership boundaries;
 - one subagent uses CodeGraph to verify routes, services, mappers, call paths, and related code facts.
 
+Apply the Subagent Timeout Discipline above whenever these subagents are used. Record timed-out or missing subagent evidence in the final report instead of waiting indefinitely or blocking on agent cleanup.
+
 Do not promote if Serena or CodeGraph is required for the repository but unavailable. Stop and report the missing tool or initialization step instead of creating placeholder capability or evidence documents.
 
 Call `promote-candidate.mjs` only after assembling a payload with `capabilities[]`. Each capability must include real `capabilityId`, `name`, `summary`, `responsibilities`, `nonResponsibilities`, and `body`. Each capability must include at least one `evidence[]` item with real `evidenceKind`, `name`, `summary`, `source`, `generator`, `generation_evidence`, and `body`; include structured sections such as `entryPaths`, `routes`, `callRelations`, `dataMessages`, `frontendEntries`, and `limitations` when available.
 
 After promotion, run `sync.mjs` and `verify.mjs`. The final report must include `contextPath`, `capabilityPaths`, `evidencePaths`, `changePath`, `docsCount`, and `candidateRemoved`. If `docsCount` is 0, treat the promotion as failed and investigate before reporting completion.
+
+## Post-generation Calibration
+
+After generating or promoting multiple contexts, run an agent semantic recall check and prepare an overlap calibration report when there are overlap signals. Overlap is not an error by itself; it is a calibration candidate.
+
+Yog must not decide context boundaries on its own. Only the user can decide whether suspected overlap should become a merge, split, rename, relationship, or no-op. The report should list evidence and options, not a forced conclusion.
+
+Overlap signals include:
+
+- shared business terms in `name`, `summary`, responsibilities, non-responsibilities, keywords, or business-flow reading order;
+- `possibleDuplicates[]`, `confirmedDuplicates[]`, or duplicate decisions from candidate reduce/write flows;
+- agent semantic recall results where the same query reasonably selects multiple contexts;
+- recurring business-flow adjacency between the same contexts;
+- missing `CONTEXT-MAP.md` relationships that force agents to infer whether contexts are overlapping or merely upstream/downstream.
+
+For each suspected overlap, report the context ids, triggering signals, example user queries, affected business-flow sections, and decision options:
+
+- keep separate and add explicit `CONTEXT-MAP.md` relationship;
+- merge contexts;
+- rename or rewrite responsibilities/non-responsibilities;
+- mark as `needs-review` and defer;
+- gather more code or business evidence before deciding.
+
+Apply changes to `CONTEXT-MAP.md`, context summaries, responsibilities, non-responsibilities, keywords, or business-flow reading order only after the user makes a decision.
 
 ## Candidate Duplicate Confirmation
 
