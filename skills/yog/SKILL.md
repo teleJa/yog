@@ -52,6 +52,12 @@ Exit code `0` means completed or P2-only. Exit code `1` means target repository 
 - `sync.mjs`: run `build-index` and `lint`.
 - `match-scope.mjs`: return deterministic business-flow, context, ADR, capability, and evidence matches for smoke checks and diagnostics. It is not the primary semantic retrieval path; normal agent routing should read `index.json`, `INDEX.md`, business-flow documents, and `CONTEXT-MAP.md`.
 
+## Optional: Multi-repo Router Extension
+
+`generate-router.mjs` is an **optional extension, not part of the core single-repo protocol**. Every core script above takes a single-repo `{repoRoot}` input and serves one knowledge base; `generate-router` instead takes a *manifest of repositories* and serves aggregate workflows that orchestrate many repos. Aggregate workflows use it on demand; single-repo Yog usage never needs it.
+
+- `generate-router.mjs`: pure list transformation. Reads a `router-input` (`{schemaVersion, repositories:[{repo,path,remote,knowledgeRoot,yogInitialized}]}`) on stdin, writes a thin repository-location index (`{schemaVersion, kind:"router", generated_at, entries:[{type:"repository",...}], issues}`) on stdout. It **never reads any repository's internals** — it does not require repos to be mounted and does not touch the single-repo boundary. This is the first layer of a two-layer router: it locates *which repo* a need belongs to; the second layer (reading contexts/capabilities/evidence) is each repo's own Yog index. `repo` must match `ID_PATTERN`; each entry needs at least one of `path`/`remote`; `yogInitialized:false` repos still appear (so consumers can degrade); duplicate `repo` and missing fields are reported as P1 issues. The caller (workflow adapter) is responsible for probing `yogInitialized` (via the target repo's `.yog/config.json`) and for user confirmation before writing the output. See the integration guide for the full contract.
+
 ## Prompt Hook Integration
 
 `install-hooks.mjs` is optional and separate from `init`. It wires a `UserPromptSubmit` hook that, on every user prompt, injects a short instruction pointing the agent at `docs/knowledge/index.json`, `INDEX.md`, and `CONTEXT-MAP.md`, with business-flow matches as the preferred end-to-end overview before context drill-down.

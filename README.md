@@ -139,6 +139,18 @@ npm test
 
 The tests use temporary repositories and cover initialization, document creation, candidate reduction, hook installation, indexing, linting, verification, sync, routing, script contracts, and non-goals.
 
+## Why index.json Instead Of RAG
+
+A common challenge: why route through a generated `index.json` instead of embedding every document into a vector store and retrieving with RAG? Three reasons, in order of bluntness:
+
+1. **The scale never reaches RAG's threshold.** RAG exists to retrieve from corpora too large to enumerate — tens of thousands of documents, millions of chunks. Business knowledge derived from a single repository's code is a different order of magnitude: typically a few dozen contexts, with a global `index.json` an agent reads in one pass. When the whole index fits in context and the agent can judge relevance directly, RAG solves a problem that does not exist here. Do not add machinery for a problem you do not have.
+
+2. **RAG would flatten the structure Yog builds.** Yog's documents are not an undifferentiated corpus waiting to be searched — they are already modeled into a directed structure: `CONTEXT-MAP.md` is a routing graph, business flows link contexts, evidence is tied to specific code. Chunking that into vectors discards the boundaries and relationships Yog works to maintain, then tries to approximate them back with similarity scores. It also breaks two core principles: **determinism** (vector recall is probabilistic — swap the embedding model or chunk strategy and results shift, which conflicts with "files are facts, diffable, verifiable, lintable") and the **business-language / code-evidence separation** (blind chunking mixes business definitions and implementation details into one vector space).
+
+3. **The consumer already has semantic ability.** Yog's retrieval is done by the agent's own semantic understanding — it reads `CONTEXT-MAP.md` / `index.json` / summaries and judges which context to enter. RAG is a middle layer built for retrieval systems that *lack* semantic ability; an LLM agent does not need one bolted on to do what it already does well. Yog only needs to hand the agent a clean routing map, not a fuzzy recall engine. Reading a complete, structured, sourced context beats stitching understanding from context-stripped fragments.
+
+In short: Yog's problem is never "too many documents to search" — it is "business knowledge has no structure and drifts." RAG solves the former; Yog solves the latter. The `keywords` fields are semantic anchors for the agent, not inputs for machine similarity scoring. If a knowledge base ever grew to hundreds or thousands of contexts, a semantic pre-filter could sit *on top of* the structure as an optional accelerator — never as a replacement for it, and the final locate-and-read always follows the structured path.
+
 ## Non-Goals
 
 For the current version, Yog does not provide:
