@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 const skill = readFileSync('skills/yog/SKILL.md', 'utf8');
 const initSkill = readFileSync('skills/init/SKILL.md', 'utf8');
 const discoverSkill = readFileSync('skills/discover-candidates/SKILL.md', 'utf8');
+const businessFlowSkill = readFileSync('skills/business-flow/SKILL.md', 'utf8');
 const syncVerifySkill = readFileSync('skills/sync-verify/SKILL.md', 'utf8');
 
 test('skill documents creation workflow before scripts', () => {
@@ -76,6 +77,9 @@ test('skill documents subagent timeout discipline', () => {
   assert.match(skill, /Do not block the critical path on closing old or completed subagents/);
   assert.match(skill, /Never bulk-close many subagents in parallel/);
   assert.match(skill, /timed_out: true/);
+  assert.match(skill, /one bounded inline fallback/);
+  assert.match(skill, /Do not spawn a replacement subagent/);
+  assert.match(skill, /<agent>-inline-fallback/);
 });
 
 test('skill documents post-generation overlap calibration', () => {
@@ -108,6 +112,11 @@ test('discover-candidates skill documents fanout and write gates', () => {
   assert.match(discoverSkill, /controller-route-agent/);
   assert.match(discoverSkill, /service-flow-agent/);
   assert.match(discoverSkill, /data-contract-agent/);
+  assert.match(discoverSkill, /one bounded inline fallback/);
+  assert.match(discoverSkill, /Do not spawn a replacement subagent/);
+  assert.match(discoverSkill, /controller-route-agent` fallback scans only controllers/);
+  assert.match(discoverSkill, /<agent>-inline-fallback/);
+  assert.match(discoverSkill, /fallback_for/);
   assert.match(discoverSkill, /reduce-candidates\.mjs/);
   assert.match(discoverSkill, /write-candidates\.mjs/);
   assert.match(discoverSkill, /mid-low-scope-required/);
@@ -124,4 +133,18 @@ test('sync-verify skill documents index and lint boundary', () => {
   assert.match(syncVerifySkill, /check-index/);
   assert.match(syncVerifySkill, /lint/);
   assert.match(syncVerifySkill, /Do not discover candidates/);
+});
+
+test('business-flow skill documents overview creation boundary', () => {
+  assert.match(businessFlowSkill, /name: business-flow/);
+  assert.match(businessFlowSkill, /business-flows\/\*\.md/);
+  assert.match(businessFlowSkill, /index\.json/);
+  assert.match(businessFlowSkill, /INDEX\.md/);
+  assert.match(businessFlowSkill, /CONTEXT-MAP\.md/);
+  assert.match(businessFlowSkill, /contexts, capabilities, evidence, ADRs/);
+  assert.match(businessFlowSkill, /Do not discover candidates/);
+  assert.match(businessFlowSkill, /promote candidates/);
+  assert.match(businessFlowSkill, /change context boundaries/);
+  assert.match(businessFlowSkill, /sync\.mjs/);
+  assert.match(businessFlowSkill, /verify\.mjs/);
 });

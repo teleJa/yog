@@ -35,7 +35,7 @@
       "Use yog:discover-candidates to discover context candidates for this project.",
       "Use yog:sync-verify to sync and verify this docs/knowledge knowledge base.",
       "Use Yog to review and promote a candidate into a formal context.",
-      "Use Yog to create a business-flow overview from existing contexts."
+      "Use yog:business-flow to create a business-flow overview from existing contexts."
     ],
     "brandColor": "#2563EB"
   }

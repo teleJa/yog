@@ -37,10 +37,11 @@ test('plugin exposes Yog skill entry directories', () => {
   assert.equal(existsSync(join(root, 'skills/yog/SKILL.md')), true);
   assert.equal(existsSync(join(root, 'skills/init/SKILL.md')), true);
   assert.equal(existsSync(join(root, 'skills/discover-candidates/SKILL.md')), true);
+  assert.equal(existsSync(join(root, 'skills/business-flow/SKILL.md')), true);
   assert.equal(existsSync(join(root, 'skills/sync-verify/SKILL.md')), true);
   assert.deepEqual(
     readdirSync(join(root, 'skills')).filter((entry) => existsSync(join(root, 'skills', entry, 'SKILL.md'))).sort(),
-    ['discover-candidates', 'init', 'sync-verify', 'yog'],
+    ['business-flow', 'discover-candidates', 'init', 'sync-verify', 'yog'],
   );
 });
 

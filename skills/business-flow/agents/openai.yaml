@@ -1,0 +1,4 @@
+interface:
+  display_name: "Business Flow"
+  short_description: "Create Yog business-flow overviews."
+  default_prompt: "Create or update a business-flow overview from existing Yog contexts."

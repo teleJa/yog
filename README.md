@@ -30,6 +30,7 @@ Yog exposes a small set of agent-facing skills:
 skills/yog/SKILL.md                 General fallback and shared workflow rules
 skills/init/SKILL.md                Initialize docs/knowledge in a repository
 skills/discover-candidates/SKILL.md Discover needs-review candidate contexts
+skills/business-flow/SKILL.md       Create cross-context business-flow overviews
 skills/sync-verify/SKILL.md         Sync, verify, build-index, check-index, and lint
 ```
 

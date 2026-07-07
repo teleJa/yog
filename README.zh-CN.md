@@ -36,6 +36,7 @@ Yog 暴露一组面向 agent 的 skill：
 skills/yog/SKILL.md                 通用入口和共享工作流规则
 skills/init/SKILL.md                初始化目标仓库 docs/knowledge
 skills/discover-candidates/SKILL.md 发现 needs-review 候选 context
+skills/business-flow/SKILL.md       创建跨 context 的 business-flow 总览
 skills/sync-verify/SKILL.md         sync、verify、build-index、check-index、lint
 ```
 
