@@ -3,13 +3,19 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const skill = readFileSync('skills/yog/SKILL.md', 'utf8');
+const initSkill = readFileSync('skills/init/SKILL.md', 'utf8');
+const discoverSkill = readFileSync('skills/discover-candidates/SKILL.md', 'utf8');
+const syncVerifySkill = readFileSync('skills/sync-verify/SKILL.md', 'utf8');
 
 test('skill documents creation workflow before scripts', () => {
+  assert.match(skill, /yog:init/);
+  assert.match(skill, /yog:discover-candidates/);
+  assert.match(skill, /yog:sync-verify/);
   assert.match(skill, /discover candidates/);
   assert.match(skill, /review candidates/);
   assert.match(skill, /promote candidates/);
-  assert.match(skill, /create business-flow overviews/);
-  assert.match(skill, /sync indexes/);
+  assert.match(skill, /business-flow overviews/);
+  assert.match(skill, /sync or verify requests/);
   assert.match(skill, /Ask for the business scope before creating/);
   assert.match(skill, /create-candidate/);
   assert.match(skill, /write-candidates/);
@@ -79,4 +85,34 @@ test('skill documents post-generation overlap calibration', () => {
 test('skill does not expose user-visible commands or MCP server instructions', () => {
   assert.doesNotMatch(skill, /mcpServers/);
   assert.doesNotMatch(skill, /commands\//);
+});
+
+test('init skill documents repository initialization boundary', () => {
+  assert.match(initSkill, /name: init/);
+  assert.match(initSkill, /does not install or update the Yog plugin/);
+  assert.match(initSkill, /Call the Yog internal `init\.mjs` script/);
+  assert.match(initSkill, /Run `verify\.mjs` after init/);
+  assert.match(initSkill, /ask the user whether to run `discover-candidates`/);
+  assert.match(initSkill, /Do not run `discover-candidates` during init unless the user confirms/);
+});
+
+test('discover-candidates skill documents fanout and write gates', () => {
+  assert.match(discoverSkill, /name: discover-candidates/);
+  assert.match(discoverSkill, /CodeGraph is initialized/);
+  assert.match(discoverSkill, /controller-route-agent/);
+  assert.match(discoverSkill, /service-flow-agent/);
+  assert.match(discoverSkill, /data-contract-agent/);
+  assert.match(discoverSkill, /reduce-candidates\.mjs/);
+  assert.match(discoverSkill, /write-candidates\.mjs/);
+  assert.match(discoverSkill, /Do not promote candidates/);
+});
+
+test('sync-verify skill documents index and lint boundary', () => {
+  assert.match(syncVerifySkill, /name: sync-verify/);
+  assert.match(syncVerifySkill, /sync/);
+  assert.match(syncVerifySkill, /verify/);
+  assert.match(syncVerifySkill, /build-index/);
+  assert.match(syncVerifySkill, /check-index/);
+  assert.match(syncVerifySkill, /lint/);
+  assert.match(syncVerifySkill, /Do not discover candidates/);
 });

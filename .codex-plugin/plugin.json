@@ -31,11 +31,11 @@
     "privacyPolicyURL": "https://example.com/privacy",
     "termsOfServiceURL": "https://example.com/terms",
     "defaultPrompt": [
-      "Initialize Yog for this project.",
-      "Use Yog to discover context candidates for this project.",
+      "Use yog:init to initialize this repository.",
+      "Use yog:discover-candidates to discover context candidates for this project.",
+      "Use yog:sync-verify to sync and verify this docs/knowledge knowledge base.",
       "Use Yog to review and promote a candidate into a formal context.",
-      "Use Yog to create a business-flow overview from existing contexts.",
-      "Use Yog to sync and verify this docs/knowledge knowledge base."
+      "Use Yog to create a business-flow overview from existing contexts."
     ],
     "brandColor": "#2563EB"
   }

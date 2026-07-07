@@ -24,19 +24,22 @@ Yog provides a repository-local knowledge protocol:
 
 ## Current Plugin Surface
 
-Yog currently exposes one agent-facing skill:
+Yog exposes a small set of agent-facing skills:
 
 ```text
-skills/yog/SKILL.md
+skills/yog/SKILL.md                 General fallback and shared workflow rules
+skills/init/SKILL.md                Initialize docs/knowledge in a repository
+skills/discover-candidates/SKILL.md Discover needs-review candidate contexts
+skills/sync-verify/SKILL.md         Sync, verify, build-index, check-index, and lint
 ```
 
-The skill calls internal Node ESM scripts under:
+The skills call internal Node ESM scripts under:
 
 ```text
 skills/yog/scripts/
 ```
 
-The first public version intentionally does not expose a standalone CLI, MCP server, HTTP server, or user-visible command set. The scripts are stable internal automation points for the skill and tests.
+The first public version intentionally does not expose a standalone CLI, MCP server, HTTP server, or user-visible command set. The scripts are stable internal automation points for the skills and tests.
 
 Yog supports both Codex and Claude Code plugin layouts:
 

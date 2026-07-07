@@ -1,11 +1,17 @@
 ---
 name: yog
-description: Use when users ask Yog to initialize or maintain docs/knowledge, discover candidates, review candidates, promote candidates to contexts, create business-flow overviews, sync indexes, verify indexes, route business knowledge, or calibrate context overlap. Yog is one agent-facing skill backed by internal Node scripts.
+description: General Yog docs/knowledge business knowledge-base skill and fallback router. Use for broad Yog questions, routing business knowledge, review or promotion workflows, business-flow overviews, calibration, or when a more specific Yog skill does not match. Prefer yog:init for initialization, yog:discover-candidates for candidate discovery, and yog:sync-verify for sync or verify requests.
 ---
 
 # Yog
 
-Use Yog when a user asks to initialize, route, create, verify, or maintain a `docs/knowledge` business knowledge base. Also use Yog when the user says they want to discover candidates, review candidates, promote candidates, create a business-flow overview, sync indexes, verify indexes, test semantic recall, or calibrate context overlap.
+Use Yog as the general docs/knowledge business knowledge-base skill and fallback router. For stable direct entry points, prefer:
+
+- `yog:init` for repository initialization and the post-init discover question.
+- `yog:discover-candidates` for automatic candidate discovery.
+- `yog:sync-verify` for sync, verify, build-index, check-index, and lint.
+
+Use this general skill when the user asks to route business knowledge, review candidates, promote candidates, create a business-flow overview, test semantic recall, calibrate overlap, or when a more specific Yog skill does not match.
 
 ## Entry Rules
 

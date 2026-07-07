@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -33,8 +33,15 @@ function candidate(index) {
   };
 }
 
-test('plugin exposes exactly one Yog skill directory', () => {
+test('plugin exposes Yog skill entry directories', () => {
   assert.equal(existsSync(join(root, 'skills/yog/SKILL.md')), true);
+  assert.equal(existsSync(join(root, 'skills/init/SKILL.md')), true);
+  assert.equal(existsSync(join(root, 'skills/discover-candidates/SKILL.md')), true);
+  assert.equal(existsSync(join(root, 'skills/sync-verify/SKILL.md')), true);
+  assert.deepEqual(
+    readdirSync(join(root, 'skills')).filter((entry) => existsSync(join(root, 'skills', entry, 'SKILL.md'))).sort(),
+    ['discover-candidates', 'init', 'sync-verify', 'yog'],
+  );
 });
 
 test('init script accepts stdin JSON and returns JSON on input errors', () => {

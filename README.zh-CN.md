@@ -30,13 +30,16 @@ Yog 提供一套仓库内知识协议：
 
 ## 当前插件形态
 
-Yog 当前只暴露一个面向 agent 的 skill：
+Yog 暴露一组面向 agent 的 skill：
 
 ```text
-skills/yog/SKILL.md
+skills/yog/SKILL.md                 通用入口和共享工作流规则
+skills/init/SKILL.md                初始化目标仓库 docs/knowledge
+skills/discover-candidates/SKILL.md 发现 needs-review 候选 context
+skills/sync-verify/SKILL.md         sync、verify、build-index、check-index、lint
 ```
 
-skill 会调用内部 Node ESM 脚本：
+这些 skill 会调用内部 Node ESM 脚本：
 
 ```text
 skills/yog/scripts/
