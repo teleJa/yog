@@ -1,7 +1,7 @@
 # 候选门禁按信度分层设计
 
 - 日期: 2026-07-07
-- 状态: 已批准,待实现
+- 状态: 已修订,待实现
 - 范围: Yog `discover-candidates` 工作流的候选数量门禁
 
 ## 背景与问题
@@ -74,7 +74,12 @@ confidence = score >= 8 ? 'high' : (score >= 4 ? 'medium' : 'low')
 ```
 
 - 由 `init.mjs`(经 `scaffold.mjs:44-49` 的 `mergeConfig`)在初始化时写入默认结构。
+- `mergeConfig` 必须深合并 `discover` 段:保留 `existing.discover` 的未知字段,只在
+  `maxMidLowCandidates` 缺失时补默认值 10。
 - 已初始化的老仓库缺该字段时,读取回落到默认 10,不报错(向后兼容)。
+- `payload.maxCandidates` 如果出现,必须是正整数;否则按调用方输入错误返回 `code: 2`。
+- `config.discover.maxMidLowCandidates` 如果不是正整数,记录 P2 issue 并回落默认 10,
+  避免历史仓库因手工配置错误阻断 discovery。
 
 ### 2. 门禁语义(核心改动,`scaffold.mjs:reduceCandidates`)
 
@@ -110,17 +115,21 @@ reducer 返回结构变化:
 - `gate`: 触发时为 `'mid-low-scope-required'`;否则沿用现有 `'ok'` /
   `'batch-duplicates-require-resolution'`。
 - `stats` 新增 `high`(高信度数)、`midLow`(中低信度数)、`threshold`(生效阈值)。
+- `stats` 新增 `thresholdSource`(`payload` / `config` / `default`),用于最终报告解释阈值来源。
 - 新增 `gatedCandidates[]`:被挡候选的元信息,**不含 body**,字段为
   `candidateId / name / confidence / score / hitAgents / identitySymbols`。
 - 触发时 `writable` 仍含 high 候选;`lowConfidence` 为空(low 已被挡)。
-- `code`: 触发时返回 `code: 1`(与现有 "gate blocker" 语义一致),
-  表示非干净 `ok`、需人工介入;但下游 write 步骤仍会落盘 high 候选与诊断报告。
+- `code`: 触发 `mid-low-scope-required` 时返回 `code: 0`。这是"部分成功且允许继续写入"
+  的状态,主 agent 必须继续调用 `write-candidates.mjs`,由 write 步骤写入 high 候选和
+  `_gated/gated-candidates.md`。真正阻断性 gate 仍使用非 0 退出码。
 
 边界:
 - `midLow.length` 恰好 == threshold 时**不触发**;== threshold + 1 触发。
 - 全 high(midLow = 0)永不触发。
 - 无 high 且 midLow 超限时,`writable` 为空但仍返回 `gatedCandidates[]` 与
-  `gate: 'mid-low-scope-required'`。
+  `gate: 'mid-low-scope-required'`,`code: 0`;write 步骤只写诊断报告,不写候选文件。
+- `diskDuplicates` / `batchDuplicates` 对 `writable` 中的 high 候选仍然生效。若 high
+  候选存在重复阻断,重复门禁优先于自动写入,不得因为 mid/low 被挡而绕过去重确认。
 
 ### 3. 落盘契约(reducer 纯函数 + write 步骤落盘)
 
@@ -137,7 +146,13 @@ reducer 返回结构变化:
 > 注:因为 "gate 触发但仍要写 high" 这一行为本就要求 write 步骤感知 gate,
 > 在此顺手写诊断 md 最自然,reducer 纯函数契约不被破坏。
 > 现有 `writeCandidates` 在 `reduceOutput.gate !== 'ok'` 时直接 `code:3` 拒写
-> (`scaffold.mjs:1254-1255`),需为新 gate 开一条"写 high + 写报告"的分支。
+> (`scaffold.mjs:1254-1255`),需允许 `mid-low-scope-required` 这一非阻断 gate。
+
+写入门禁优先级:
+
+1. `payload` 结构非法 / `payload.maxCandidates` 非正整数 → `reduceCandidates` 返回 `code: 2`,不进入 write。
+2. high 候选存在 `batchDuplicates` 或未确认的 `diskDuplicates` → `writeCandidates` 返回 `code: 3`,不写候选;仍可写诊断报告,但最终状态必须提示重复确认未完成。
+3. `gate: 'mid-low-scope-required'` 且 high 无重复阻断 → `writeCandidates` 写 high 候选和诊断报告,返回 `code: 0`。
 
 诊断 md 落盘规则(A + 1):
 
@@ -176,7 +191,7 @@ reducer 返回结构变化:
 reduceCandidates(纯函数)
    ├─ 打分分档 high / midLow
    ├─ midLow > threshold ?
-   │     是 → gate='mid-low-scope-required', writable=[high], gatedCandidates=[midLow], code=1
+   │     是 → gate='mid-low-scope-required', writable=[high], gatedCandidates=[midLow], code=0
    │     否 → 现有正常路径(writable/lowConfidence 照旧)
    ▼
 writeCandidates(落盘)
@@ -200,6 +215,9 @@ writeCandidates(落盘)
   `payload.maxCandidates` 仍为显式覆盖(向后兼容)。
 - 脚本描述(L47-48):`reduce-candidates.mjs` / `write-candidates.mjs` 各补一句
   gated 行为。
+- Stage C 编排说明必须同步更新:当 `reduce-candidates.mjs` 返回
+  `gate: 'mid-low-scope-required'` 且退出码为 0 时,主 agent 仍应调用
+  `write-candidates.mjs`;只有输入错误、重复阻断等非 0 状态才停止写入。
 
 ## 测试策略
 
@@ -207,15 +225,20 @@ writeCandidates(落盘)
 
 reducer 单测(`test/yog/reduce-candidates.test.mjs`):
 - 构造 `high=3, midLow=12, threshold=10` → 断言 `gate='mid-low-scope-required'`、
-  `writable` 只含 3 个 high、`gatedCandidates` 含 12 个且带 score/confidence、`code=1`。
+  `writable` 只含 3 个 high、`gatedCandidates` 含 12 个且带 score/confidence、脚本退出码为 0。
 - 边界:`midLow == threshold`(不触发)、`== threshold+1`(触发)。
 - 全 high(midLow=0)不触发;全 low 且超限触发且 `writable` 空。
 - 配置优先级:`payload.maxCandidates` 覆盖 config;config 覆盖默认;都无 = 10。
+- 非法配置:`payload.maxCandidates` 非正整数返回 `code: 2`;config 非法记录 P2 并回落默认 10。
 
 write 单测(`test/yog/create-documents.test.mjs` 或新增):
 - gate 触发时断言 high 候选文件写入 + `_gated/gated-candidates.md` 生成 +
   返回 `gatedReportPath`。
 - 覆盖策略:重跑覆盖旧诊断文件。
+- 端到端脚本流:真实执行 `reduce-candidates.mjs` 后按退出码继续执行
+  `write-candidates.mjs`,断言 high 文件和 `_gated/gated-candidates.md` 均落盘。
+- 重复阻断:当 high 候选命中 disk duplicate / batch duplicate 时,断言不写候选,
+  返回确认需求,且不会被 `mid-low-scope-required` 绕过。
 
 回归(`test/yog/index.test.mjs` / `lint-verify-sync.test.mjs`):
 - 确认 `_gated/` 不被候选扫描 / build-index / lint 误读为正式候选。
@@ -227,4 +250,5 @@ write 单测(`test/yog/create-documents.test.mjs` 或新增):
 
 - 老仓库无 `discover.maxMidLowCandidates` → 回落默认 10,行为等价于"中低信度上限 10"。
 - `payload.maxCandidates` 调用方无需改动,数值语义从"总数上限"平移为"中低信度上限"。
-- 与现有 `diskDuplicates` / `batchDuplicates` 门禁正交,互不影响。
+- 与现有 `diskDuplicates` / `batchDuplicates` 门禁保持独立判定,但不得互相绕过:
+  high 自动写入前仍必须通过重复确认门禁。

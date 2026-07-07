@@ -26,6 +26,7 @@ test('skill documents creation workflow before scripts', () => {
 });
 
 test('skill documents exit codes and candidate confirmation', () => {
+  assert.match(skill, /mid-low-scope-required/);
   assert.match(skill, /Exit code `3` means user confirmation is required and no write occurred/);
   assert.match(skill, /candidate-duplicates-found/);
   assert.match(skill, /matchedFields/);
@@ -38,7 +39,10 @@ test('skill documents init and discover-candidates gates', () => {
   assert.match(skill, /do not leave it discoverable only through the scripts list/);
   assert.match(skill, /`discover-candidates` is an agent workflow/);
   assert.match(skill, /CodeGraph is initialized/);
-  assert.match(skill, /more than 10 candidates/);
+  assert.match(skill, /discover\.maxMidLowCandidates/);
+  assert.match(skill, /medium\+low confidence candidates/);
+  assert.match(skill, /gatedCandidates/);
+  assert.match(skill, /gatedReportPath/);
   assert.match(skill, /Do not fall back to filename-only or `rg`-only discovery/);
   assert.match(skill, /needs-review/);
   assert.match(skill, /identity_symbols/);
@@ -51,6 +55,7 @@ test('skill documents init and discover-candidates gates', () => {
   assert.match(skill, /candidate_count/);
   assert.match(skill, /Candidates should not enter `index\.json` or `INDEX\.md`/);
   assert.match(skill, /candidate_count: 0/);
+  assert.match(skill, /only medium\/low candidates exceeded the threshold/);
 });
 
 test('skill documents candidate promotion requires real capability and evidence', () => {
@@ -92,6 +97,7 @@ test('init skill documents repository initialization boundary', () => {
   assert.match(initSkill, /does not install or update the Yog plugin/);
   assert.match(initSkill, /Call the Yog internal `init\.mjs` script/);
   assert.match(initSkill, /Run `verify\.mjs` after init/);
+  assert.match(initSkill, /discover\.maxMidLowCandidates/);
   assert.match(initSkill, /ask the user whether to run `discover-candidates`/);
   assert.match(initSkill, /Do not run `discover-candidates` during init unless the user confirms/);
 });
@@ -104,6 +110,9 @@ test('discover-candidates skill documents fanout and write gates', () => {
   assert.match(discoverSkill, /data-contract-agent/);
   assert.match(discoverSkill, /reduce-candidates\.mjs/);
   assert.match(discoverSkill, /write-candidates\.mjs/);
+  assert.match(discoverSkill, /mid-low-scope-required/);
+  assert.match(discoverSkill, /thresholdSource/);
+  assert.match(discoverSkill, /gatedReportPath/);
   assert.match(discoverSkill, /Do not promote candidates/);
 });
 

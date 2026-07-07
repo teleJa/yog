@@ -102,9 +102,9 @@ Automatic candidate discovery starts after init and has a stricter gate. It requ
 
 If CodeGraph is missing or not initialized, stop automatic discovery and initialize CodeGraph first. Do not fall back to filename-only or `rg`-only discovery for automatic candidates.
 
-When CodeGraph is available, the agent may run `discover-candidates` by combining existing business docs, OpenSpec changes, and CodeGraph call or symbol evidence. Discovery may write `needs-review` candidate documents under `candidates/*.md`, but candidates remain outside generated routing indexes until a human confirms the boundary and promotes them into formal contexts.
+When CodeGraph is available, the agent may run `discover-candidates` through the Yog discovery workflow. Discovery uses code evidence lenses as its truth source; existing business docs, OpenSpec changes, README, and requirement prose may enrich promotion later, but must not be treated as discovery truth. Discovery may write `needs-review` candidate documents under `candidates/*.md`, but candidates remain outside generated routing indexes until a human confirms the boundary and promotes them into formal contexts.
 
-If discovery finds more than 10 candidates, stop before writing and ask the user to narrow the scope. Duplicate candidates must not be overwritten or merged automatically.
+If medium+low confidence candidates exceed `discover.maxMidLowCandidates` (default 10 in `.yog/config.json`), high confidence candidates may still be written, while the blocked medium/low candidates are recorded in `candidates/_gated/gated-candidates.md` for review or scope narrowing. Duplicate candidates must not be overwritten or merged automatically.
 
 ### Subagent Timeout Discipline
 

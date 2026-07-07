@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync,
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CODE_SYMBOL_PATTERN, EVIDENCE_KINDS, ID_PATTERN } from './constants.mjs';
-import { mergeConfig, writeConfig } from './config.mjs';
+import { DEFAULT_DISCOVER_CONFIG, mergeConfig, writeConfig } from './config.mjs';
 import { parseFrontmatter, stringifyFrontmatter } from './frontmatter.mjs';
 import { hasRealBodyContent, hasTemplatePlaceholder } from './markdown.mjs';
 import { contextPath, knowledgePath, readRepoConfig, repoRelative, resolveRepoContext } from './knowledge-root.mjs';
@@ -45,6 +45,7 @@ export function initKnowledgeBase(input = {}) {
     schemaVersion: 1,
     knowledgeRoot: context.knowledgeRoot,
     codeFactProvider: input.payload?.codeFactProvider ?? existing.codeFactProvider ?? { type: 'codegraph', status: 'configured' },
+    discover: existing.discover ?? DEFAULT_DISCOVER_CONFIG,
   });
   writeConfig(context.repoRoot, merged);
   writeRootManagedBlocks(context.repoRoot, context.knowledgeRoot);
@@ -767,10 +768,100 @@ function findBatchDuplicatePlan(candidates) {
   return blocking;
 }
 
+function isPositiveInteger(value) {
+  return Number.isInteger(value) && value > 0;
+}
+
+function resolveDiscoverThreshold(input, context) {
+  const payloadValue = input.payload?.maxCandidates;
+  if (payloadValue !== undefined && !isPositiveInteger(payloadValue)) {
+    return {
+      issues: [inputIssue('payload.maxCandidates must be a positive integer.', { field: 'payload.maxCandidates' })],
+    };
+  }
+  if (payloadValue !== undefined) {
+    return { threshold: payloadValue, thresholdSource: 'payload', issues: [] };
+  }
+  const configValue = context.config?.discover?.maxMidLowCandidates;
+  if (isPositiveInteger(configValue)) {
+    return { threshold: configValue, thresholdSource: 'config', issues: [] };
+  }
+  const issues = configValue === undefined
+    ? []
+    : [{
+        severity: 'P2',
+        message: 'Invalid discover.maxMidLowCandidates config; defaulting to 10.',
+        path: '.yog/config.json',
+        details: { field: 'discover.maxMidLowCandidates', value: configValue },
+      }];
+  return { threshold: DEFAULT_DISCOVER_CONFIG.maxMidLowCandidates, thresholdSource: 'default', issues };
+}
+
+function gatedCandidateBrief(payload) {
+  return {
+    candidateId: payload.candidateId,
+    name: payload.name,
+    confidence: payload.confidence,
+    score: payload.score,
+    hitAgents: payload.hitAgents ?? [],
+    identitySymbols: payload.identitySymbols ?? payload.identity_symbols ?? [],
+  };
+}
+
+function filterPossibleDuplicatesForCandidates(possibleDuplicates, candidates) {
+  const ids = new Set(candidates.map((candidate) => candidate.candidateId));
+  return (possibleDuplicates ?? []).filter((duplicate) => ids.has(duplicate.left?.candidateId) && ids.has(duplicate.right?.candidateId));
+}
+
+function renderGatedCandidatesReport(reduceOutput) {
+  const stats = reduceOutput.stats ?? {};
+  const gatedCandidates = reduceOutput.gatedCandidates ?? [];
+  const mediumCount = gatedCandidates.filter((candidate) => candidate.confidence === 'medium').length;
+  const lowCount = gatedCandidates.filter((candidate) => candidate.confidence === 'low').length;
+  const rows = gatedCandidates.map((candidate) => {
+    const hitAgents = normalizeList(candidate.hitAgents).join(', ');
+    const identitySymbols = normalizeList(candidate.identitySymbols ?? candidate.identity_symbols).join(', ');
+    return `| ${candidate.candidateId} | ${candidate.name} | ${candidate.confidence} | ${candidate.score} | ${hitAgents} | ${identitySymbols} |`;
+  });
+  return [
+    '# 被门禁挡下的中低信度候选',
+    '',
+    `> 生成时间: ${new Date().toISOString()}`,
+    `> 阈值: maxMidLowCandidates = ${stats.threshold ?? DEFAULT_DISCOVER_CONFIG.maxMidLowCandidates}(来源: ${stats.thresholdSource ?? 'default'})`,
+    `> 本次被挡: ${gatedCandidates.length} 个 (medium ${mediumCount} / low ${lowCount})`,
+    `> 已自动写入的 high 候选: ${stats.high ?? 0} 个`,
+    '',
+    '## 说明',
+    '',
+    '本次自动发现的中低信度候选数量超过阈值,已挡下不写入正式候选区。',
+    '请缩小扫描范围重跑,或用 payload.maxCandidates 放宽后重跑。',
+    '',
+    '## 被挡候选清单',
+    '',
+    '| candidateId | name | confidence | score | hitAgents | identity_symbols |',
+    '|---|---|---|---|---|---|',
+    ...(rows.length ? rows : ['|  |  |  |  |  |  |']),
+    '',
+  ].join('\n');
+}
+
+function writeGatedCandidatesReport(input, reduceOutput) {
+  if (reduceOutput.gate !== 'mid-low-scope-required' && !(reduceOutput.gatedCandidates?.length > 0)) return null;
+  const context = resolveRepoContext(input);
+  const reportDir = join(context.knowledgeAbs, 'candidates', '_gated');
+  const reportPath = join(reportDir, 'gated-candidates.md');
+  mkdirSync(reportDir, { recursive: true });
+  writeMarkdown(reportPath, renderGatedCandidatesReport(reduceOutput));
+  return knowledgePath(context.knowledgeRoot, 'candidates', '_gated', 'gated-candidates.md');
+}
+
 export function reduceCandidates(input = {}) {
   const context = resolveRepoContext(input);
   const batches = input.payload?.batches;
-  const maxCandidates = Number.isInteger(input.payload?.maxCandidates) ? input.payload.maxCandidates : 10;
+  const threshold = resolveDiscoverThreshold(input, context);
+  if (threshold.issues?.some((issue) => issue.details?.field === 'payload.maxCandidates')) {
+    return { code: 2, output: { issues: threshold.issues } };
+  }
   if (!Array.isArray(batches)) {
     return {
       code: 2,
@@ -836,25 +927,15 @@ export function reduceCandidates(input = {}) {
     clusters: clusters.length,
     writable: 0,
     lowConfidence: 0,
+    high: 0,
+    midLow: 0,
+    threshold: threshold.threshold,
+    thresholdSource: threshold.thresholdSource,
     possibleDuplicates: 0,
     diskDuplicates: 0,
     joinConflicts: components.joinConflicts.length,
     rejected: rejected.length,
   };
-  if (clusters.length > maxCandidates) {
-    return {
-      code: 1,
-      output: {
-        gate: 'narrow-scope-required',
-        stats: baseStats,
-        writable: [],
-        lowConfidence: [],
-        possibleDuplicates: [],
-        joinConflicts: components.joinConflicts,
-        rejected,
-      },
-    };
-  }
   const possibleDuplicates = [];
   for (let leftIndex = 0; leftIndex < clusters.length; leftIndex += 1) {
     for (let rightIndex = leftIndex + 1; rightIndex < clusters.length; rightIndex += 1) {
@@ -874,14 +955,23 @@ export function reduceCandidates(input = {}) {
   }
   const writable = [];
   const lowConfidence = [];
+  const highConfidence = [];
+  const midLowPayloads = [];
   for (const cluster of clusters) {
     const payload = clusterToPayload(cluster, duplicateHintsByCandidateId.get(cluster.representative.candidateId) ?? []);
+    if (cluster.confidence === 'high') highConfidence.push(payload);
+    else midLowPayloads.push(payload);
     if (cluster.confidence === 'low') lowConfidence.push(payload);
     else writable.push(payload);
   }
+  const midLowGateTriggered = midLowPayloads.length > threshold.threshold;
+  const effectiveWritable = midLowGateTriggered ? highConfidence : writable;
+  const effectiveLowConfidence = midLowGateTriggered ? [] : lowConfidence;
+  const effectiveCandidates = [...effectiveWritable, ...effectiveLowConfidence];
+  const effectivePossibleDuplicates = filterPossibleDuplicatesForCandidates(possibleDuplicates, effectiveCandidates);
   const warnings = [];
   let diskDuplicateCount = 0;
-  for (const payload of [...writable, ...lowConfidence]) {
+  for (const payload of effectiveCandidates) {
     const duplicates = findCandidateDuplicates(context, payload, { warnings });
     if (duplicates.length > 0) {
       diskDuplicateCount += 1;
@@ -891,28 +981,33 @@ export function reduceCandidates(input = {}) {
       };
     }
   }
-  const batchDuplicates = findBatchDuplicatePlan([...writable, ...lowConfidence]);
+  const batchDuplicates = findBatchDuplicatePlan(effectiveCandidates);
   const stats = {
     ...baseStats,
-    writable: writable.length,
-    lowConfidence: lowConfidence.length,
-    possibleDuplicates: possibleDuplicates.length,
+    writable: effectiveWritable.length,
+    lowConfidence: effectiveLowConfidence.length,
+    high: highConfidence.length,
+    midLow: midLowPayloads.length,
+    possibleDuplicates: effectivePossibleDuplicates.length,
     diskDuplicates: diskDuplicateCount,
     batchDuplicates: batchDuplicates.length,
   };
-  const gate = batchDuplicates.length > 0 ? 'batch-duplicates-require-resolution' : 'ok';
+  const gate = batchDuplicates.length > 0
+    ? 'batch-duplicates-require-resolution'
+    : (midLowGateTriggered ? 'mid-low-scope-required' : 'ok');
   return {
     code: (diskDuplicateCount > 0 || batchDuplicates.length > 0) ? 3 : 0,
     output: {
       gate,
       stats,
-      writable,
-      lowConfidence,
-      possibleDuplicates,
+      writable: effectiveWritable,
+      lowConfidence: effectiveLowConfidence,
+      gatedCandidates: midLowGateTriggered ? midLowPayloads.map(gatedCandidateBrief) : [],
+      possibleDuplicates: effectivePossibleDuplicates,
       batchDuplicates,
       joinConflicts: components.joinConflicts,
       rejected,
-      issues: warnings,
+      issues: [...(threshold.issues ?? []), ...warnings],
     },
   };
 }
@@ -1251,9 +1346,11 @@ export function writeCandidates(input = {}) {
   if (!Array.isArray(candidates)) {
     return { code: 2, output: { issues: [inputIssue('reduceOutput writable/lowConfidence must be arrays.', { field: 'payload.reduceOutput' })] } };
   }
-  if (reduceOutput.gate && reduceOutput.gate !== 'ok') {
+  const allowedGate = !reduceOutput.gate || ['ok', 'mid-low-scope-required'].includes(reduceOutput.gate);
+  if (!allowedGate) {
     return { code: 3, output: { issues: [inputIssue('reduceOutput gate is not ok; refusing to write candidates.', { gate: reduceOutput.gate })], written: 0, blocked: reduceOutput.batchDuplicates?.length ?? 0, results: [], confirmedDuplicates: [], blockedDuplicates: reduceOutput.batchDuplicates ?? [] } };
   }
+  const gatedReportPath = writeGatedCandidatesReport(input, reduceOutput);
   const decisions = payload.duplicateDecisions ?? {};
   const { plans, results, confirmedDuplicates, blockedDuplicates } = planCandidateWrites(input, candidates, decisions, reduceOutput);
   if (blockedDuplicates.length > 0) {
@@ -1266,6 +1363,7 @@ export function writeCandidates(input = {}) {
         results,
         confirmedDuplicates,
         blockedDuplicates,
+        gatedReportPath,
       },
     };
   }
@@ -1284,6 +1382,7 @@ export function writeCandidates(input = {}) {
       results,
       confirmedDuplicates,
       blockedDuplicates,
+      gatedReportPath,
     },
   };
 }

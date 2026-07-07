@@ -48,6 +48,8 @@ test('init creates docs/knowledge skeleton config and managed blocks', () => {
   assert.equal(existsSync(join(repoRoot, 'docs/knowledge/templates/business-flow.md')), true);
   assert.equal(existsSync(join(repoRoot, 'docs/knowledge/templates/evidence.md')), true);
   assert.equal(existsSync(join(repoRoot, '.yog/config.json')), true);
+  const config = JSON.parse(readFileSync(join(repoRoot, '.yog/config.json'), 'utf8'));
+  assert.deepEqual(config.discover, { maxMidLowCandidates: 10 });
   const agents = readFileSync(join(repoRoot, 'AGENTS.md'), 'utf8');
   const claude = readFileSync(join(repoRoot, 'CLAUDE.md'), 'utf8');
   const blockPattern = /<!-- YOG MANAGED BLOCK START -->[\s\S]*<!-- YOG MANAGED BLOCK END -->/;
@@ -61,7 +63,8 @@ test('init creates docs/knowledge skeleton config and managed blocks', () => {
   assert.match(knowledgeReadme, /Automatic candidate discovery/);
   assert.match(knowledgeReadme, /business-flows\/\*\.md/);
   assert.match(knowledgeReadme, /CodeGraph initialized/);
-  assert.match(knowledgeReadme, /more than 10 candidates/);
+  assert.match(knowledgeReadme, /discover\.maxMidLowCandidates/);
+  assert.match(knowledgeReadme, /candidates\/_gated\/gated-candidates\.md/);
   assert.match(knowledgeReadme, /Minimum migration package/);
   assert.doesNotMatch(knowledgeReadme, /docs\/knowledge\/BUILD-PLAN\.md/);
   assert.match(knowledgeAgents, /Yog plugin skill as the complete specification/);
@@ -81,6 +84,7 @@ test('init can record selected tool configuration without requiring tools for in
   const config = JSON.parse(readFileSync(join(repoRoot, '.yog/config.json'), 'utf8'));
   assert.equal(deprecatedToolKey in config, false);
   assert.deepEqual(config.codeFactProvider, { type: 'none', status: 'not-configured' });
+  assert.deepEqual(config.discover, { maxMidLowCandidates: 10 });
 });
 
 test('init defaults to Yog code fact tools when configuration is omitted', () => {
@@ -90,6 +94,7 @@ test('init defaults to Yog code fact tools when configuration is omitted', () =>
   const config = JSON.parse(readFileSync(join(repoRoot, '.yog/config.json'), 'utf8'));
   assert.equal(deprecatedToolKey in config, false);
   assert.deepEqual(config.codeFactProvider, { type: 'codegraph', status: 'configured' });
+  assert.deepEqual(config.discover, { maxMidLowCandidates: 10 });
 });
 
 test('init replaces only the managed block and preserves existing file content', () => {
@@ -111,6 +116,20 @@ test('init is idempotent and does not overwrite existing template file', () => {
   const output = JSON.parse(result.stdout);
   assert.equal(output.issues.some((issue) => issue.severity === 'P2'), true);
   assert.equal(readFileSync(join(repoRoot, 'docs/knowledge/templates/evidence.md'), 'utf8'), 'team edited evidence template\n');
+});
+
+test('init preserves existing discover config and fills defaults', () => {
+  const repoRoot = tempRepo();
+  runInit(repoRoot);
+  const configPath = join(repoRoot, '.yog/config.json');
+  const config = JSON.parse(readFileSync(configPath, 'utf8'));
+  config.discover = { maxMidLowCandidates: 25, customFutureFlag: true };
+  writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+  const result = runInit(repoRoot);
+  assert.equal(result.status, 0);
+  const updated = JSON.parse(readFileSync(configPath, 'utf8'));
+  assert.equal(updated.discover.maxMidLowCandidates, 25);
+  assert.equal(updated.discover.customFutureFlag, true);
 });
 
 test('upgrade-guidance reports and applies README and AGENTS template updates', () => {

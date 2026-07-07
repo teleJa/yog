@@ -91,6 +91,30 @@ test('lint reports P2 for duplicate candidates without blocking', () => {
   assert.equal(JSON.parse(result.stdout).issues[0].severity, 'P2');
 });
 
+test('lint ignores gated candidate diagnostic reports', () => {
+  const repoRoot = repo();
+  mkdirSync(join(repoRoot, 'docs/knowledge/candidates/_gated'), { recursive: true });
+  writeFileSync(join(repoRoot, 'docs/knowledge/candidates/_gated/gated-candidates.md'), `# 被门禁挡下的中低信度候选
+
+| candidateId | name | confidence | score | hitAgents | identity_symbols |
+|---|---|---|---|---|---|
+| refund | Refund | medium | 5 | controller-route-agent | RefundService#refund |
+`);
+  const result = run(repoRoot, 'lint');
+  assert.equal(result.status, 0);
+  assert.deepEqual(JSON.parse(result.stdout).issues, []);
+});
+
+test('sync ignores gated candidate diagnostic reports', () => {
+  const repoRoot = repo();
+  mkdirSync(join(repoRoot, 'docs/knowledge/candidates/_gated'), { recursive: true });
+  writeFileSync(join(repoRoot, 'docs/knowledge/candidates/_gated/gated-candidates.md'), '# diagnostic only\n');
+  const result = run(repoRoot, 'sync');
+  assert.equal(result.status, 0);
+  const index = JSON.parse(readFileSync(join(repoRoot, 'docs/knowledge/index.json'), 'utf8'));
+  assert.equal(index.entries.some((entry) => entry.path?.includes('_gated')), false);
+});
+
 test('lint reports P1 for invalid relationships in CONTEXT-MAP', () => {
   const repoRoot = repo();
   run(repoRoot, 'create-context', {

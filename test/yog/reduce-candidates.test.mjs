@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -173,24 +173,82 @@ test('reduce-candidates rejects missing symbols and keeps low confidence candida
   assert.equal(output.lowConfidence[0].candidateId, 'thin-data');
 });
 
-test('reduce-candidates gates when post-join clusters exceed maxCandidates', () => {
+test('reduce-candidates gates only mid-low candidates when threshold is exceeded', () => {
   const repoRoot = tempRepo();
-  const candidates = Array.from({ length: 11 }, (_, index) => candidate({
-    candidateId: `candidate-${index}`,
-    name: `Candidate ${index}`,
-    code_symbols: [`Class${index}#method`],
-    evidence_paths: [`src/Class${index}.java`],
+  const highCandidates = Array.from({ length: 3 }, (_, index) => candidate({
+    candidateId: `high-candidate-${index}`,
+    name: `High Candidate ${index}`,
+    code_symbols: [`HighClass${index}#method`, `HighMapper${index}#save`, `HighService${index}#sync`],
+    evidence_paths: [`src/HighClass${index}.java`, `src/HighMapper${index}.java`, `src/HighService${index}.java`],
+  }));
+  const midLowCandidates = Array.from({ length: 11 }, (_, index) => candidate({
+    candidateId: `midlow-candidate-${index}`,
+    name: `MidLow Candidate ${index}`,
+    code_symbols: [`MidLowClass${index}#method`],
+    evidence_paths: [`src/MidLowClass${index}.java`],
   }));
   const result = runScript(repoRoot, 'reduce-candidates', {
     maxCandidates: 10,
-    batches: [{ agent: 'controller-route-agent', candidates }],
+    batches: [{ agent: 'controller-route-agent', candidates: [...highCandidates, ...midLowCandidates] }],
   });
-  assert.equal(result.status, 1);
+  assert.equal(result.status, 0);
   const output = JSON.parse(result.stdout);
-  assert.equal(output.gate, 'narrow-scope-required');
-  assert.equal(output.stats.clusters, 11);
-  assert.deepEqual(output.writable, []);
+  assert.equal(output.gate, 'mid-low-scope-required');
+  assert.equal(output.stats.clusters, 14);
+  assert.equal(output.stats.high, 3);
+  assert.equal(output.stats.midLow, 11);
+  assert.equal(output.stats.threshold, 10);
+  assert.equal(output.stats.thresholdSource, 'payload');
+  assert.deepEqual(output.writable.map((item) => item.candidateId).sort(), ['high-candidate-0', 'high-candidate-1', 'high-candidate-2']);
   assert.deepEqual(output.lowConfidence, []);
+  assert.equal(output.gatedCandidates.length, 11);
+  assert.equal(output.gatedCandidates[0].score >= 0, true);
+});
+
+test('reduce-candidates respects mid-low threshold boundaries and config fallback', () => {
+  const repoRoot = tempRepo();
+  const configPath = join(repoRoot, '.yog/config.json');
+  const config = JSON.parse(readFileSync(configPath, 'utf8'));
+  config.discover.maxMidLowCandidates = 2;
+  writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+  const thresholdCandidates = Array.from({ length: 2 }, (_, index) => candidate({
+    candidateId: `threshold-candidate-${index}`,
+    name: `Threshold Candidate ${index}`,
+    code_symbols: [`ThresholdClass${index}#method`],
+    evidence_paths: [`src/ThresholdClass${index}.java`],
+  }));
+  const equal = runScript(repoRoot, 'reduce-candidates', {
+    batches: [{ agent: 'controller-route-agent', candidates: thresholdCandidates }],
+  });
+  assert.equal(equal.status, 0);
+  const equalOutput = JSON.parse(equal.stdout);
+  assert.equal(equalOutput.gate, 'ok');
+  assert.equal(equalOutput.stats.threshold, 2);
+  assert.equal(equalOutput.stats.thresholdSource, 'config');
+
+  const exceeded = runScript(repoRoot, 'reduce-candidates', {
+    batches: [{ agent: 'controller-route-agent', candidates: [...thresholdCandidates, candidate({ candidateId: 'threshold-candidate-2', name: 'Threshold Candidate 2', code_symbols: ['ThresholdClass2#method'], evidence_paths: ['src/ThresholdClass2.java'] })] }],
+  });
+  assert.equal(exceeded.status, 0);
+  assert.equal(JSON.parse(exceeded.stdout).gate, 'mid-low-scope-required');
+
+  config.discover.maxMidLowCandidates = 'bad';
+  writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+  const invalidConfig = runScript(repoRoot, 'reduce-candidates', {
+    batches: [{ agent: 'controller-route-agent', candidates: thresholdCandidates }],
+  });
+  assert.equal(invalidConfig.status, 0);
+  const invalidOutput = JSON.parse(invalidConfig.stdout);
+  assert.equal(invalidOutput.stats.threshold, 10);
+  assert.equal(invalidOutput.stats.thresholdSource, 'default');
+  assert.equal(invalidOutput.issues.some((issue) => issue.severity === 'P2' && /Invalid discover/.test(issue.message)), true);
+
+  const invalidPayload = runScript(repoRoot, 'reduce-candidates', {
+    maxCandidates: 0,
+    batches: [{ agent: 'controller-route-agent', candidates: thresholdCandidates }],
+  });
+  assert.equal(invalidPayload.status, 2);
+  assert.match(JSON.parse(invalidPayload.stdout).issues[0].message, /maxCandidates/);
 });
 
 test('reduce-candidates reports disk duplicates by candidate ids and code symbols', () => {
@@ -272,6 +330,102 @@ test('write-candidates blocks weak duplicate writes until batch decision is prov
   assert.equal(confirmedOutput.confirmedDuplicates[0].candidateId, 'traffic-attribution');
   assert.equal(existsSync(join(confirmedRepo, 'docs/knowledge/candidates/period-customer.md')), true);
   assert.equal(existsSync(join(confirmedRepo, 'docs/knowledge/candidates/traffic-attribution.md')), true);
+});
+
+test('write-candidates writes high candidates and gated report for mid-low gate', () => {
+  const repoRoot = tempRepo();
+  const highCandidate = candidate({
+    candidateId: 'course-high',
+    name: 'Course High',
+    code_symbols: ['CourseHighController#create', 'CourseHighService#create', 'CourseHighMapper#save'],
+    evidence_paths: ['src/CourseHighController.java', 'src/CourseHighService.java', 'src/CourseHighMapper.java'],
+  });
+  const midLowCandidates = Array.from({ length: 11 }, (_, index) => candidate({
+    candidateId: `overflow-${index}`,
+    name: `Overflow ${index}`,
+    code_symbols: [`Overflow${index}#method`],
+    evidence_paths: [`src/Overflow${index}.java`],
+  }));
+  const reduce = runScript(repoRoot, 'reduce-candidates', {
+    maxCandidates: 10,
+    batches: [{ agent: 'controller-route-agent', candidates: [highCandidate, ...midLowCandidates] }],
+  });
+  assert.equal(reduce.status, 0);
+  const reduceOutput = JSON.parse(reduce.stdout);
+  assert.equal(reduceOutput.gate, 'mid-low-scope-required');
+  assert.deepEqual(reduceOutput.writable.map((item) => item.candidateId), ['course-high']);
+  const written = runScript(repoRoot, 'write-candidates', { reduceOutput });
+  assert.equal(written.status, 0);
+  const output = JSON.parse(written.stdout);
+  assert.equal(output.written, 1);
+  assert.equal(output.gatedReportPath, 'docs/knowledge/candidates/_gated/gated-candidates.md');
+  assert.equal(existsSync(join(repoRoot, 'docs/knowledge/candidates/course-high.md')), true);
+  assert.equal(existsSync(join(repoRoot, 'docs/knowledge/candidates/overflow-0.md')), false);
+  const reportPath = join(repoRoot, output.gatedReportPath);
+  const report = readFileSync(reportPath, 'utf8');
+  assert.match(report, /# 被门禁挡下的中低信度候选/);
+  assert.match(report, /本次被挡: 11 个/);
+  assert.match(report, /已自动写入的 high 候选: 1 个/);
+  assert.match(report, /overflow-0/);
+
+  const overwriteRepo = tempRepo();
+  const overwriteReportPath = join(overwriteRepo, output.gatedReportPath);
+  mkdirSync(join(overwriteRepo, 'docs/knowledge/candidates/_gated'), { recursive: true });
+  writeFileSync(overwriteReportPath, 'old gated report\n');
+  const overwrittenReduce = runScript(overwriteRepo, 'reduce-candidates', {
+    maxCandidates: 1,
+    batches: [{ agent: 'controller-route-agent', candidates: [
+      candidate({ candidateId: 'later-high', name: 'Later High', code_symbols: ['LaterController#create', 'LaterService#create', 'LaterMapper#save'], evidence_paths: ['src/LaterController.java', 'src/LaterService.java', 'src/LaterMapper.java'] }),
+      candidate({ candidateId: 'later-overflow-a', name: 'Later Overflow A', code_symbols: ['LaterA#method'], evidence_paths: ['src/LaterA.java'] }),
+      candidate({ candidateId: 'later-overflow-b', name: 'Later Overflow B', code_symbols: ['LaterB#method'], evidence_paths: ['src/LaterB.java'] }),
+    ] }],
+  });
+  assert.equal(overwrittenReduce.status, 0);
+  const overwritten = runScript(overwriteRepo, 'write-candidates', { reduceOutput: JSON.parse(overwrittenReduce.stdout) });
+  assert.equal(overwritten.status, 0);
+  const overwrittenReport = readFileSync(overwriteReportPath, 'utf8');
+  assert.match(overwrittenReport, /later-overflow-a/);
+  assert.doesNotMatch(overwrittenReport, /old gated report/);
+});
+
+test('write-candidates does not bypass duplicate gates for high candidates under mid-low gate', () => {
+  const repoRoot = tempRepo();
+  assert.equal(runScript(repoRoot, 'create-candidate', {
+    candidateId: 'course-high-existing',
+    name: 'Course High Existing',
+    summary: 'Existing high candidate.',
+    keywords: ['course-high'],
+    possible_contexts: ['course-live'],
+    code_symbols: ['CourseHighController#create'],
+    body: '- existing candidate.',
+    evidence: '- symbol: CourseHighController#create',
+  }).status, 0);
+  const reduce = runScript(repoRoot, 'reduce-candidates', {
+    maxCandidates: 1,
+    batches: [{ agent: 'controller-route-agent', candidates: [
+      candidate({
+        candidateId: 'course-high-new',
+        name: 'Course High New',
+        keywords: ['course-high'],
+        code_symbols: ['CourseHighController#create', 'CourseHighService#create', 'CourseHighMapper#save'],
+        evidence_paths: ['src/CourseHighController.java', 'src/CourseHighService.java', 'src/CourseHighMapper.java'],
+      }),
+      candidate({ candidateId: 'overflow-a', name: 'Overflow A', code_symbols: ['OverflowA#method'], evidence_paths: ['src/OverflowA.java'] }),
+      candidate({ candidateId: 'overflow-b', name: 'Overflow B', code_symbols: ['OverflowB#method'], evidence_paths: ['src/OverflowB.java'] }),
+    ] }],
+  });
+  assert.equal(reduce.status, 3);
+  const reduceOutput = JSON.parse(reduce.stdout);
+  assert.equal(reduceOutput.gate, 'mid-low-scope-required');
+  assert.equal(reduceOutput.stats.diskDuplicates, 1);
+  const blocked = runScript(repoRoot, 'write-candidates', { reduceOutput });
+  assert.equal(blocked.status, 3);
+  const output = JSON.parse(blocked.stdout);
+  assert.equal(output.written, 0);
+  assert.equal(output.blocked, 1);
+  assert.equal(output.gatedReportPath, 'docs/knowledge/candidates/_gated/gated-candidates.md');
+  assert.equal(existsSync(join(repoRoot, 'docs/knowledge/candidates/course-high-new.md')), false);
+  assert.equal(existsSync(join(repoRoot, 'docs/knowledge/candidates/_gated/gated-candidates.md')), true);
 });
 
 test('write-candidates blocks same identity batch duplicates before writing any files', () => {

@@ -10,7 +10,7 @@ Use this skill when the user asks to initialize Yog in the current repository. T
 ## Scope
 
 - Initialize `docs/knowledge`.
-- Write or update `.yog/config.json`.
+- Write or update `.yog/config.json`, including `discover.maxMidLowCandidates`.
 - Upsert Yog managed blocks in root `AGENTS.md` and `CLAUDE.md`.
 - Preserve existing `docs/knowledge/**` files.
 - Run read-only verification after initialization.
@@ -24,7 +24,7 @@ Do not promote candidates, create formal contexts, create business flows, run se
 2. Use `knowledgeRoot: "docs/knowledge"` unless the user explicitly gives another root.
 3. Call the Yog internal `init.mjs` script with the standard JSON protocol.
 4. Report created, updated, and skipped files. Skipped existing `docs/knowledge/**` files are P2 advisory results, not failures.
-5. Inspect `.yog/config.json` and report `knowledgeRoot` and `codeFactProvider`.
+5. Inspect `.yog/config.json` and report `knowledgeRoot`, `codeFactProvider`, and `discover.maxMidLowCandidates`.
 6. Run `verify.mjs` after init and report `check-index` / `lint` results. If the repository has just been initialized and only has empty indexes or P2 advisory issues, say that explicitly.
 7. Report whether `docs/knowledge/templates/candidate.md` exists and whether CodeGraph is initialized for the repository.
 8. Stop and ask the user whether to run `discover-candidates` now.
@@ -32,6 +32,7 @@ Do not promote candidates, create formal contexts, create business flows, run se
 ## Gates
 
 - Missing CodeGraph must not block init.
+- Default `discover.maxMidLowCandidates` is 10. Preserve existing `discover` config when re-running init.
 - Do not run `discover-candidates` during init unless the user confirms after the init report.
 - Do not ask the user to run internal Node scripts manually.
 - Do not claim init or verify passed without actual command results.
