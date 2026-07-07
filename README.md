@@ -6,6 +6,8 @@ Yog is a business knowledge-base plugin for AI coding agents. It helps a reposit
 
 Yog is designed for agent-first work. The user talks to Codex or Claude Code, the Yog skill guides the agent to read the right knowledge files before design or implementation work, and deterministic Node scripts handle filesystem changes, indexing, linting, and verification.
 
+For a Chinese task prompt that can be pasted directly into Codex or Claude Code agent context, see: [Yog agent task prompt](./docs/user-agent-prompts.zh-CN.md).
+
 ## What Yog Is For
 
 Large codebases often lose business context faster than they lose code structure. READMEs, PRDs, and one-off notes drift away from implementation, while agents keep rediscovering the same boundaries from scratch.
@@ -44,6 +46,92 @@ Yog supports both Codex and Claude Code plugin layouts:
 ```
 
 Both manifests point at the same `./skills/` directory so the two agent surfaces receive the same guidance.
+
+## Installation
+
+Yog is installed as an agent plugin first, then initialized inside each target repository where you want a `docs/knowledge` knowledge base.
+
+Requirements:
+
+- Node.js 20 or newer.
+- Codex or Claude Code with plugin support.
+
+### Codex
+
+Most users should install Yog from the GitHub repository by creating a small local marketplace wrapper. This is needed because Codex installs plugins from marketplace snapshots, while this repository is the plugin source.
+
+```bash
+MARKETPLACE=$HOME/.codex/local-marketplaces/yog-local
+YOG_REPO=$MARKETPLACE/plugins/yog
+
+mkdir -p "$MARKETPLACE/.agents/plugins" "$MARKETPLACE/plugins"
+git clone https://github.com/teleJa/yog.git "$YOG_REPO"
+cp "$YOG_REPO/.agents/plugins/marketplace.json" \
+  "$MARKETPLACE/.agents/plugins/marketplace.json"
+
+codex plugin marketplace add "$MARKETPLACE"
+codex plugin add yog@yog
+```
+
+Restart Codex after installation so the `yog` skill is loaded in new sessions.
+
+To update an existing GitHub install:
+
+```bash
+git -C "$HOME/.codex/local-marketplaces/yog-local/plugins/yog" pull --ff-only
+```
+
+Verify the plugin is visible:
+
+```bash
+codex plugin list | rg yog
+```
+
+For plugin development, use the same marketplace wrapper but replace the `git clone` step with a symlink to your working checkout:
+
+```bash
+YOG_REPO=/path/to/yog
+MARKETPLACE=$HOME/.codex/local-marketplaces/yog-local
+
+mkdir -p "$MARKETPLACE/.agents/plugins" "$MARKETPLACE/plugins"
+ln -sfn "$YOG_REPO" "$MARKETPLACE/plugins/yog"
+cp "$YOG_REPO/.agents/plugins/marketplace.json" \
+  "$MARKETPLACE/.agents/plugins/marketplace.json"
+```
+
+### Claude Code
+
+Clone the GitHub repository first:
+
+```bash
+git clone https://github.com/teleJa/yog.git /path/to/yog
+```
+
+Validate the plugin manifest:
+
+```bash
+claude plugin validate /path/to/yog
+```
+
+If you use a Claude Code marketplace, add a marketplace that exposes the cloned Yog repository as the `yog` plugin, then install `yog@yog` and restart Claude Code.
+
+### Initialize Yog In A Repository
+
+After the plugin is installed, ask the agent in the target repository to initialize Yog:
+
+```text
+Use Yog to initialize the current repository with knowledgeRoot docs/knowledge.
+```
+
+For script-level debugging or CI automation, you can also run the internal init script directly:
+
+```bash
+node /path/to/yog/skills/yog/scripts/init.mjs <<'JSON'
+{"repoRoot":"/path/to/target-repo","knowledgeRoot":"docs/knowledge","payload":{}}
+JSON
+```
+
+This creates `docs/knowledge`, writes `.yog/config.json`, and upserts Yog managed guidance into root `AGENTS.md` and `CLAUDE.md`. It does not overwrite existing `docs/knowledge/**` files.
 
 ## Core Workflows
 

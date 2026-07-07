@@ -6,6 +6,8 @@ Yog 是一个面向 AI 编码代理的业务知识库插件。它把长期有效
 
 Yog 的核心定位是 agent-first：用户仍然直接和 agent 对话；Yog skill 负责引导 agent 读取知识库、维护知识库；确定性的 Node 脚本负责写文件、建索引、lint 和 verify。
 
+如果需要把完整 Yog 执行规范直接交给 Codex / Claude Code agent，请使用：[Yog Agent 任务提示词](./docs/user-agent-prompts.zh-CN.md)。
+
 ## Yog 解决什么问题
 
 大仓库里最容易丢的不是代码结构，而是业务上下文：
@@ -50,6 +52,92 @@ skills/yog/scripts/
 ```
 
 两个 manifest 都指向同一个 `./skills/` 目录，保证两种 agent surface 使用同一份 Yog 指导。
+
+## 安装 Yog
+
+Yog 的使用分两步：先把 Yog 安装成 agent 插件，再到每个目标仓库里初始化 `docs/knowledge` 知识库。
+
+要求：
+
+- Node.js 20 或更新版本。
+- 支持插件的 Codex 或 Claude Code。
+
+### Codex
+
+多数用户应从 GitHub 仓库安装 Yog，并创建一个很小的本地 marketplace wrapper。这样做是因为 Codex 从 marketplace snapshot 安装插件，而本仓库本身是插件源码。
+
+```bash
+MARKETPLACE=$HOME/.codex/local-marketplaces/yog-local
+YOG_REPO=$MARKETPLACE/plugins/yog
+
+mkdir -p "$MARKETPLACE/.agents/plugins" "$MARKETPLACE/plugins"
+git clone https://github.com/teleJa/yog.git "$YOG_REPO"
+cp "$YOG_REPO/.agents/plugins/marketplace.json" \
+  "$MARKETPLACE/.agents/plugins/marketplace.json"
+
+codex plugin marketplace add "$MARKETPLACE"
+codex plugin add yog@yog
+```
+
+安装后重启 Codex，让新的会话加载 `yog` skill。
+
+更新已安装的 GitHub 版本：
+
+```bash
+git -C "$HOME/.codex/local-marketplaces/yog-local/plugins/yog" pull --ff-only
+```
+
+验证插件是否可见：
+
+```bash
+codex plugin list | rg yog
+```
+
+如果是在开发 Yog 插件本身，可以复用同样的 marketplace wrapper，但把 `git clone` 换成指向工作区 checkout 的软链接：
+
+```bash
+YOG_REPO=/path/to/yog
+MARKETPLACE=$HOME/.codex/local-marketplaces/yog-local
+
+mkdir -p "$MARKETPLACE/.agents/plugins" "$MARKETPLACE/plugins"
+ln -sfn "$YOG_REPO" "$MARKETPLACE/plugins/yog"
+cp "$YOG_REPO/.agents/plugins/marketplace.json" \
+  "$MARKETPLACE/.agents/plugins/marketplace.json"
+```
+
+### Claude Code
+
+先克隆 GitHub 仓库：
+
+```bash
+git clone https://github.com/teleJa/yog.git /path/to/yog
+```
+
+校验插件 manifest：
+
+```bash
+claude plugin validate /path/to/yog
+```
+
+如果使用 Claude Code marketplace，需要添加一个能把克隆后的 Yog 仓库暴露为 `yog` 插件的 marketplace，然后安装 `yog@yog` 并重启 Claude Code。
+
+### 在目标仓库初始化 Yog
+
+插件安装完成后，在目标仓库中让 agent 执行“初始化 Yog”：
+
+```text
+使用 Yog 初始化当前仓库，knowledgeRoot 使用 docs/knowledge。
+```
+
+如需脚本级调试或 CI 自动化，也可以直接运行内部初始化脚本：
+
+```bash
+node /path/to/yog/skills/yog/scripts/init.mjs <<'JSON'
+{"repoRoot":"/path/to/target-repo","knowledgeRoot":"docs/knowledge","payload":{}}
+JSON
+```
+
+该步骤会创建 `docs/knowledge`，写入 `.yog/config.json`，并在根 `AGENTS.md` / `CLAUDE.md` 中插入或更新 Yog managed guidance。它不会覆盖已有的 `docs/knowledge/**` 文件。
 
 ## 核心工作流
 

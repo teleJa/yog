@@ -32,8 +32,10 @@
     "termsOfServiceURL": "https://example.com/terms",
     "defaultPrompt": [
       "Initialize Yog for this project.",
-      "Create a Yog business knowledge candidate.",
-      "Verify this docs/knowledge knowledge base."
+      "Use Yog to discover context candidates for this project.",
+      "Use Yog to review and promote a candidate into a formal context.",
+      "Use Yog to create a business-flow overview from existing contexts.",
+      "Use Yog to sync and verify this docs/knowledge knowledge base."
     ],
     "brandColor": "#2563EB"
   }

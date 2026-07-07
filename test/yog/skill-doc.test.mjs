@@ -5,6 +5,11 @@ import { readFileSync } from 'node:fs';
 const skill = readFileSync('skills/yog/SKILL.md', 'utf8');
 
 test('skill documents creation workflow before scripts', () => {
+  assert.match(skill, /discover candidates/);
+  assert.match(skill, /review candidates/);
+  assert.match(skill, /promote candidates/);
+  assert.match(skill, /create business-flow overviews/);
+  assert.match(skill, /sync indexes/);
   assert.match(skill, /Ask for the business scope before creating/);
   assert.match(skill, /create-candidate/);
   assert.match(skill, /write-candidates/);

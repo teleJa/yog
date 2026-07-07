@@ -1,11 +1,11 @@
 ---
 name: yog
-description: Maintain docs/knowledge business knowledge bases through one agent-facing skill and internal Node scripts.
+description: Use when users ask Yog to initialize or maintain docs/knowledge, discover candidates, review candidates, promote candidates to contexts, create business-flow overviews, sync indexes, verify indexes, route business knowledge, or calibrate context overlap. Yog is one agent-facing skill backed by internal Node scripts.
 ---
 
 # Yog
 
-Use Yog when a user asks to initialize, route, create, verify, or maintain a `docs/knowledge` business knowledge base.
+Use Yog when a user asks to initialize, route, create, verify, or maintain a `docs/knowledge` business knowledge base. Also use Yog when the user says they want to discover candidates, review candidates, promote candidates, create a business-flow overview, sync indexes, verify indexes, test semantic recall, or calibrate context overlap.
 
 ## Entry Rules
 
