@@ -298,10 +298,10 @@ test('promote-candidate creates context records change and removes candidate', (
             name: 'Refund request routes',
             summary: 'HTTP routes that enter refund request handling.',
             source: 'repository',
-            generator: 'subagent-codegraph-serena',
-            generation_evidence: 'CodeGraph and Serena inspected refund route and service entry points.',
+            generator: 'subagent-codegraph',
+            generation_evidence: 'CodeGraph inspected refund route and service entry points.',
             body: 'Refund request route evidence links the HTTP entry to the refund request service.',
-            generationMethod: 'Parallel agent scan using Serena navigation and CodeGraph call evidence.',
+            generationMethod: 'Parallel agent scan using CodeGraph call evidence.',
             entryPaths: '- src/refund/controller.js',
             routes: '- POST /refunds',
             callRelations: '- RefundController -> RefundRequestService',
@@ -338,7 +338,7 @@ test('promote-candidate creates context records change and removes candidate', (
   assert.match(capability, /## 关键业务对象\n\n- refund_requests table/);
   assert.match(capability, /## 上下游关系\n\n- RefundController -> RefundRequestService/);
   assert.match(capability, /## 代码事实入口\n\n- src\/refund\/controller\.js/);
-  assert.match(capability, /## 验证方式\n\n- routes: Parallel agent scan using Serena navigation and CodeGraph call evidence\./);
+  assert.match(capability, /## 验证方式\n\n- routes: Parallel agent scan using CodeGraph call evidence\./);
   assert.match(capability, /## 未确认问题\n\n- Unit test fixture uses representative paths\./);
   const contextText = readFileSync(join(repoRoot, 'docs/knowledge/contexts/refund/CONTEXT.md'), 'utf8');
   assert.match(contextText, /## 负责什么\n\nOwn refund business language\./);
@@ -349,7 +349,7 @@ test('promote-candidate creates context records change and removes candidate', (
   assert.match(readme, /## 上下游关系\n\n入口：\n- POST \/refunds/);
   assert.match(readme, /## 相关文档\n\n- docs\/knowledge\/contexts\/refund\/evidence\/refund-request-routes\.md/);
   const evidence = readFileSync(join(repoRoot, 'docs/knowledge/contexts/refund/evidence/refund-request-routes.md'), 'utf8');
-  assert.match(evidence, /generator: subagent-codegraph-serena/);
+  assert.match(evidence, /generator: subagent-codegraph/);
   assert.match(evidence, /## 路由 \/ 接口\n\n- POST \/refunds/);
 });
 
@@ -498,8 +498,8 @@ test('promote-candidate does not remove candidate when target context exists', (
             name: 'Refund request routes',
             summary: 'HTTP routes that enter refund request handling.',
             source: 'repository',
-            generator: 'subagent-codegraph-serena',
-            generation_evidence: 'CodeGraph and Serena inspected refund route and service entry points.',
+            generator: 'subagent-codegraph',
+            generation_evidence: 'CodeGraph inspected refund route and service entry points.',
             body: 'Refund request route evidence links the HTTP entry to the refund request service.',
           },
         ],

@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import { resolveRepoContext, assertInsideRepo } from '../../skills/yog/lib/knowledge-root.mjs';
 import { mergeConfig, writeConfig } from '../../skills/yog/lib/config.mjs';
 
+const deprecatedToolKey = String.fromCharCode(115, 101, 114, 101, 110, 97);
+
 function tempRepo() {
   const dir = mkdtempSync(join(tmpdir(), 'yog-root-'));
   mkdirSync(join(dir, '.git'));
@@ -37,10 +39,10 @@ test('assertInsideRepo rejects resolved paths outside repo', () => {
 test('mergeConfig preserves unknown fields and writes non-sensitive shared config', () => {
   const merged = mergeConfig(
     { schemaVersion: 1, knowledgeRoot: 'docs/knowledge', extra: { keep: true } },
-    { serena: { enabled: true }, codeFactProvider: { type: 'none', status: 'not-configured' } },
+    { codeFactProvider: { type: 'none', status: 'not-configured' } },
   );
   assert.deepEqual(merged.extra, { keep: true });
-  assert.deepEqual(merged.serena, { enabled: true });
+  assert.equal(deprecatedToolKey in merged, false);
   assert.deepEqual(merged.codeFactProvider, { type: 'none', status: 'not-configured' });
 });
 

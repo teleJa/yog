@@ -31,7 +31,6 @@ test('skill documents init and discover-candidates gates', () => {
   assert.match(skill, /run `install-hooks\.mjs` to enable the optional per-prompt reminder/);
   assert.match(skill, /do not leave it discoverable only through the scripts list/);
   assert.match(skill, /`discover-candidates` is an agent workflow/);
-  assert.match(skill, /Serena is available/);
   assert.match(skill, /CodeGraph is initialized/);
   assert.match(skill, /more than 10 candidates/);
   assert.match(skill, /Do not fall back to filename-only or `rg`-only discovery/);
@@ -51,7 +50,6 @@ test('skill documents init and discover-candidates gates', () => {
 test('skill documents candidate promotion requires real capability and evidence', () => {
   assert.match(skill, /Promoting a candidate to a formal context must not create an empty context shell/);
   assert.match(skill, /spawn focused subagents in parallel/);
-  assert.match(skill, /one subagent uses Serena/);
   assert.match(skill, /one subagent uses CodeGraph/);
   assert.match(skill, /payload with `capabilities\[\]`/);
   assert.match(skill, /Each capability must include at least one `evidence\[\]` item/);

@@ -6,7 +6,7 @@ Yog is a business knowledge-base plugin for AI coding agents. It helps a reposit
 
 Yog is designed for agent-first work. The user talks to Codex or Claude Code, the Yog skill guides the agent to read the right knowledge files before design or implementation work, and deterministic Node scripts handle filesystem changes, indexing, linting, and verification.
 
-For a Chinese task prompt that can be pasted directly into Codex or Claude Code agent context, see: [Yog agent task prompt](./docs/user-agent-prompts.zh-CN.md).
+For a Chinese onboarding prompt that can be pasted directly into Codex or Claude Code agent context, see: [Yog agent onboarding prompt](./docs/yog-agent-onboarding-prompt.zh-CN.md). For the full user manual, see: [Yog user manual](./docs/user-agent-prompts.zh-CN.md).
 
 ## What Yog Is For
 
@@ -58,45 +58,26 @@ Requirements:
 
 ### Codex
 
-Most users should install Yog from the GitHub repository by creating a small local marketplace wrapper. This is needed because Codex installs plugins from marketplace snapshots, while this repository is the plugin source.
+Install Yog directly from the GitHub plugin marketplace:
 
 ```bash
-MARKETPLACE=$HOME/.codex/local-marketplaces/yog-local
-YOG_REPO=$MARKETPLACE/plugins/yog
-
-mkdir -p "$MARKETPLACE/.agents/plugins" "$MARKETPLACE/plugins"
-git clone https://github.com/teleJa/yog.git "$YOG_REPO"
-cp "$YOG_REPO/.agents/plugins/marketplace.json" \
-  "$MARKETPLACE/.agents/plugins/marketplace.json"
-
-codex plugin marketplace add "$MARKETPLACE"
+codex plugin marketplace add https://github.com/teleJa/yog.git
 codex plugin add yog@yog
 ```
 
 Restart Codex after installation so the `yog` skill is loaded in new sessions.
 
-To update an existing GitHub install:
+To update an existing GitHub marketplace install:
 
 ```bash
-git -C "$HOME/.codex/local-marketplaces/yog-local/plugins/yog" pull --ff-only
+codex plugin marketplace upgrade yog
+codex plugin add yog@yog
 ```
 
 Verify the plugin is visible:
 
 ```bash
 codex plugin list | rg yog
-```
-
-For plugin development, use the same marketplace wrapper but replace the `git clone` step with a symlink to your working checkout:
-
-```bash
-YOG_REPO=/path/to/yog
-MARKETPLACE=$HOME/.codex/local-marketplaces/yog-local
-
-mkdir -p "$MARKETPLACE/.agents/plugins" "$MARKETPLACE/plugins"
-ln -sfn "$YOG_REPO" "$MARKETPLACE/plugins/yog"
-cp "$YOG_REPO/.agents/plugins/marketplace.json" \
-  "$MARKETPLACE/.agents/plugins/marketplace.json"
 ```
 
 ### Claude Code
@@ -149,12 +130,11 @@ Claude Code settings are updated automatically. Codex config is not overwritten;
 
 ### Discover Candidates
 
-`discover-candidates` is an agent workflow, not a standalone Node script. It requires both:
+`discover-candidates` is an agent workflow, not a standalone Node script. It requires:
 
-- Serena available to the agent.
 - CodeGraph initialized for the target repository.
 
-If either tool is missing, Yog stops automatic discovery instead of guessing from filenames or prose. Discovery uses focused code-evidence lenses, reduces overlapping outputs through `reduce-candidates.mjs`, then writes reviewable candidate documents through `write-candidates.mjs`.
+If CodeGraph is missing, Yog stops automatic discovery instead of guessing from filenames or prose. Discovery uses focused code-evidence lenses, reduces overlapping outputs through `reduce-candidates.mjs`, then writes reviewable candidate documents through `write-candidates.mjs`.
 
 ### Promote Candidates
 
@@ -246,7 +226,7 @@ For the current version, Yog does not provide:
 - a public CLI surface for users to memorize;
 - an MCP server;
 - a web service or daemon;
-- automatic discovery without Serena and CodeGraph;
+- automatic discovery without CodeGraph;
 - publication as an npm package.
 
 ## License

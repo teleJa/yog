@@ -44,7 +44,6 @@ export function initKnowledgeBase(input = {}) {
   const merged = mergeConfig(existing, {
     schemaVersion: 1,
     knowledgeRoot: context.knowledgeRoot,
-    serena: input.payload?.serena ?? existing.serena ?? { enabled: true },
     codeFactProvider: input.payload?.codeFactProvider ?? existing.codeFactProvider ?? { type: 'codegraph', status: 'configured' },
   });
   writeConfig(context.repoRoot, merged);
@@ -60,7 +59,7 @@ export function initKnowledgeBase(input = {}) {
       {
         action: 'discover-candidates',
         status: 'gated',
-        message: 'Run automatic discover-candidates only when Serena is available and CodeGraph is initialized for this repository.',
+        message: 'Run automatic discover-candidates only when CodeGraph is initialized for this repository.',
       },
     ],
   };

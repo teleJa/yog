@@ -12,10 +12,10 @@ Use Yog when a user asks to initialize, route, create, verify, or maintain a `do
 - Ask for the business scope before creating candidate, context, capability, or evidence documents.
 - Use `docs/knowledge/index.json`, `INDEX.md`, business-flow entries, and `CONTEXT-MAP.md` for routing before scanning code. If a matching business flow exists, read it before individual contexts.
 - Read candidate documents only in explicit candidate creation, review, update, or promotion workflows.
-- Verify current implementation facts with CodeGraph, Serena, GitNexus, repository scans, or tests before making code-fact claims.
-- Missing CodeGraph, GitNexus, or Serena never blocks `init`, `create-*`, `build-index`, `check-index`, `lint`, `verify`, `sync`, or `match-scope`.
-- After `init`, first tell the user they can run `install-hooks.mjs` to enable the optional per-prompt reminder to read `docs/knowledge/CONTEXT-MAP.md`, then tell them automatic candidate discovery requires both Serena and CodeGraph to be installed and initialized for the target repository.
-- Do not run `discover-candidates` unless Serena is available to the agent and CodeGraph is initialized for the target repository.
+- Verify current implementation facts with CodeGraph, repository scans, or tests before making code-fact claims. Prefer CodeGraph for call-chain and symbol evidence.
+- Missing CodeGraph never blocks `init`, `create-*`, `build-index`, `check-index`, `lint`, `verify`, `sync`, or `match-scope`.
+- After `init`, first tell the user they can run `install-hooks.mjs` to enable the optional per-prompt reminder to read `docs/knowledge/CONTEXT-MAP.md`, then tell them automatic candidate discovery requires CodeGraph to be initialized for the target repository.
+- Do not run `discover-candidates` unless CodeGraph is initialized for the target repository.
 
 ## Script Protocol
 
@@ -71,16 +71,15 @@ Exit code `0` means completed or P2-only. Exit code `1` means target repository 
 
 ## Init And Candidate Discovery
 
-`init.mjs` is the init step. It must succeed without Serena or CodeGraph because it only creates `docs/knowledge`, `.yog/config.json`, and managed guidance blocks.
+`init.mjs` is the init step. It must succeed without CodeGraph because it only creates `docs/knowledge`, `.yog/config.json`, and managed guidance blocks.
 
 `init.mjs` must not overwrite existing `docs/knowledge/**` files. It initializes `business-flows/` and `templates/business-flow.md` so a business operation overview can connect multiple contexts. When an existing repository needs the current Yog guidance text, run `upgrade-guidance.mjs` explicitly. Without `payload.apply: true`, it reports P2 differences and does not write. With `payload.apply: true`, it replaces `docs/knowledge/AGENTS.md` and `docs/knowledge/README.md` from the current templates, and rewrites the Yog managed block inside the root `AGENTS.md` and `CLAUDE.md` while preserving the rest of those files. This is allowed because these files and blocks are guidance, not business knowledge source documents.
 
-After init, recommend `install-hooks.mjs` as the optional next step that makes Yog context routing active on every prompt. Continue to `discover-candidates` only when both conditions are true:
+After init, recommend `install-hooks.mjs` as the optional next step that makes Yog context routing active on every prompt. Continue to `discover-candidates` only when this condition is true:
 
-- Serena is available in the current Codex session for the target repository.
 - CodeGraph is initialized for the target repository and can answer code-structure queries.
 
-If either condition is missing, stop discovery and tell the user exactly which tool must be installed or initialized. Do not fall back to filename-only or `rg`-only discovery for automatic candidates.
+If CodeGraph is missing, stop discovery and tell the user to initialize CodeGraph. Do not fall back to filename-only or `rg`-only discovery for automatic candidates.
 
 If the user only asks for init, stop after `init.mjs`, report that `install-hooks.mjs` was not executed, and report that `discover-candidates` was not executed. If the user asks to test whether init can generate business documents, discover candidates, scan business boundaries, or otherwise produce candidate knowledge, init alone is not complete. First offer the hook step, then continue through the discovery workflow when the required tools are available and report candidate results.
 
@@ -88,8 +87,8 @@ Before discovery, verify that the target repository has `docs/knowledge/template
 
 `discover-candidates` is an agent workflow, not a standalone Node script. It has three stages:
 
-1. Stage A, preflight and task split: verify Serena is available, CodeGraph is initialized for the target repository, and `docs/knowledge/templates/candidate.md` exists.
-2. Stage B, parallel read-only fan-out: run 3 code evidence lenses against the same repository. `controller-route-agent` scans controllers, Feign/Dubbo services, HTTP routes, and client entries. `service-flow-agent` uses CodeGraph and Serena to scan service call chains, core business services, and cross-service dependencies. `data-contract-agent` scans mappers, entities, DTOs, XML, table contracts, cache, states, and messages. Do not include a docs-scan-agent in discover; docs, OpenSpec, PRD, README, and requirement prose are promote/enrich references, not discover truth sources.
+1. Stage A, preflight and task split: verify CodeGraph is initialized for the target repository and `docs/knowledge/templates/candidate.md` exists.
+2. Stage B, parallel read-only fan-out: run 3 code evidence lenses against the same repository. `controller-route-agent` scans controllers, Feign/Dubbo services, HTTP routes, and client entries. `service-flow-agent` uses CodeGraph to scan service call chains, core business services, and cross-service dependencies. `data-contract-agent` scans mappers, entities, DTOs, XML, table contracts, cache, states, and messages. Do not include a docs-scan-agent in discover; docs, OpenSpec, PRD, README, and requirement prose are promote/enrich references, not discover truth sources.
 3. Stage C, deterministic reduce and write: pass the 3 subagent JSON outputs to `reduce-candidates.mjs`; only after it returns `gate: ok` may the main agent pass the reduce output to `write-candidates.mjs`. Do not loop over `create-candidate.mjs` directly for automatic discovery batches.
 
 Each subagent final message must be a JSON object with `agent`, `scan_scope`, `tools_used`, `candidates[]`, and `skipped[]`. Each candidate must include `candidateId`, `name`, `summary`, `business_boundary`, `responsibilities_hint`, `non_responsibilities_hint`, `code_symbols`, `evidence_paths`, `keywords`, `possible_contexts`, `confidence`, `confidence_reason`, and `skip_reason`. `code_symbols` is required and must use canonical forms such as `Class#method`, `Class`, `MapperClass#statementId`, or `InterfaceClass#method`; paths, routes, table names, cache keys, and prose are evidence, not strong JOIN symbols. For better JOIN precision, candidates may also provide `identity_symbols` and `supporting_symbols`: `identity_symbols` are the narrow object identity used for automatic JOIN, while `supporting_symbols` are preserved as evidence but do not JOIN clusters. When `identity_symbols` is omitted, `code_symbols` is treated as the identity set for backward compatibility.
@@ -111,7 +110,7 @@ Candidate discovery may automatically write `needs-review` documents under `docs
 
 Each auto-discovered candidate body must include:
 
-- discovery sources, such as the 3 code evidence lenses, Serena, and CodeGraph;
+- discovery sources, such as the 3 code evidence lenses and CodeGraph;
 - execution-structure evidence references, such as files, canonical symbols, routes, services, mappers, DTOs, entities, or message contracts;
 - a confidence note, normally `low` or `medium`, explaining why it remains `needs-review`.
 
@@ -126,12 +125,11 @@ Promoting a candidate to a formal context must not create an empty context shell
 For large repositories, spawn focused subagents in parallel when useful:
 
 - one subagent verifies business boundary, terms, responsibilities, and non-responsibilities from existing docs, PRDs, OpenSpec, and candidate notes;
-- one subagent uses Serena to locate symbols, entry files, and code ownership boundaries;
-- one subagent uses CodeGraph to verify routes, services, mappers, call paths, and related code facts.
+- one subagent uses CodeGraph to locate symbols, entry files, code ownership boundaries, routes, services, mappers, call paths, and related code facts.
 
 Apply the Subagent Timeout Discipline above whenever these subagents are used. Record timed-out or missing subagent evidence in the final report instead of waiting indefinitely or blocking on agent cleanup.
 
-Do not promote if Serena or CodeGraph is required for the repository but unavailable. Stop and report the missing tool or initialization step instead of creating placeholder capability or evidence documents.
+Do not promote if CodeGraph is required for the repository but unavailable. Stop and report the missing initialization step instead of creating placeholder capability or evidence documents.
 
 Call `promote-candidate.mjs` only after assembling a payload with `capabilities[]`. Each capability must include real `capabilityId`, `name`, `summary`, `responsibilities`, `nonResponsibilities`, and `body`. Each capability must include at least one `evidence[]` item with real `evidenceKind`, `name`, `summary`, `source`, `generator`, `generation_evidence`, and `body`; include structured sections such as `entryPaths`, `routes`, `callRelations`, `dataMessages`, `frontendEntries`, and `limitations` when available.
 

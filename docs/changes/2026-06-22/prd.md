@@ -25,9 +25,9 @@ Yog 要解决的是：让 agent 先按业务知识库路由，再按证据和代
 - 使用 `evidence/*.md` 分离实现事实与业务意图。
 - 使用 Markdown frontmatter 作为索引源数据，生成 `INDEX.md` 和 `index.json`。
 - 通过 managed `AGENTS.md` 和 `CLAUDE.md` block 同时支持 Codex 与 Claude Code，引导 agent 先读知识库。
-- 在未安装 GitNexus、CodeGraph 或 Serena 时，核心知识库脚本仍可运行。
-- 将 GitNexus、CodeGraph、Serena 作为代码事实或符号导航工具，而不是 `init`、`sync`、`verify` 等核心脚本前置依赖。
-- 自动 `discover-candidates` 是 agent workflow，必须同时具备 Serena 和 CodeGraph 后才能写入 `needs-review` candidate。
+- 在未初始化 CodeGraph 时，核心知识库脚本仍可运行。
+- 将 CodeGraph 作为调用链和符号证据的默认工具，而不是 `init`、`sync`、`verify` 等核心脚本前置依赖。
+- 自动 `discover-candidates` 是 agent workflow，必须具备 CodeGraph 后才能写入 `needs-review` candidate。
 - 通过内部 `sync`、`verify`、`lint` 脚本提供本地质量门禁。
 - 首版内部脚本不引入第三方运行时 npm 依赖。
 - 首版重点是知识文档生成、索引读取和质量审核闭环。
@@ -36,8 +36,8 @@ Yog 要解决的是：让 agent 先按业务知识库路由，再按证据和代
 
 - 不从代码自动推断并确认业务上下文边界。
 - 不从代码事实自动把业务能力提升为 `verified`。
-- 首版不实现真实 GitNexus、Serena、CodeGraph evidence refresh。
-- 首版不允许在缺少 Serena 或 CodeGraph 时自动发现并写入候选业务边界。
+- 首版不实现真实 CodeGraph evidence refresh。
+- 首版不允许在缺少 CodeGraph 时自动发现并写入候选业务边界。
 - 首版不实现 RAG、运行时日志证据、截图证据或外部契约同步。
 - 首版不安装真实 git hook、PR/MR 门禁或定时审计流水线。
 - 首版不实现语义聚类、自动合并候选或 LLM/embedding 驱动的候选去重。
@@ -179,8 +179,7 @@ Yog 的首版不提供用户需要记忆的公开 CLI，也不通过 MCP server 
 - 从插件内 `templates/knowledge` 拷贝完整 `docs/knowledge` 基础设施骨架。
 - 写入或更新 `.yog/config.json`。
 - 写入或更新 `AGENTS.md` 和 `CLAUDE.md` 的 Yog managed block。
-- 根据用户确认结果写入 Serena 启用状态。
-- 根据用户确认结果写入 GitNexus、CodeGraph 或暂不配置代码事实 provider。
+- 根据用户确认结果写入 CodeGraph 或暂不配置代码事实 provider。
 - provider 为 `none` 时，核心脚本仍可运行。
 
 约束：
@@ -192,7 +191,7 @@ Yog 的首版不提供用户需要记忆的公开 CLI，也不通过 MCP server 
 - 重复执行必须幂等。
 - `AGENTS.md` 和 `CLAUDE.md` 都是首版必写目标，且只能更新 Yog managed block。
 - `init` 不创建空 context、capability、evidence 或 candidate。
-- `init` 完成后应提示：自动 `discover-candidates` 需要 Serena 和 CodeGraph 都已安装并针对目标仓库可用。
+- `init` 完成后应提示：自动 `discover-candidates` 需要 CodeGraph 针对目标仓库初始化并可用。
 - `init` 不创建示例 ADR；只创建 `docs/knowledge/adr/` 目录。
 - `init` 创建空目录时同步创建该目录的 `README.md`，用于说明目录用途并保证目录可提交。
 - 目录 `README.md` 可由团队后续编辑，但只作为目录说明，不承载具体业务结论。
@@ -249,7 +248,7 @@ Yog skill 随后检索 `docs/knowledge/index.json`、`INDEX.md` 和 `CONTEXT-MAP
 - `create-evidence` 写入时必须填充 `source`、`generator` 和 `generation_evidence`；`repo_commit` 和 `generated_at` 缺失时只能创建 `draft`，不得创建 `verified` evidence。
 - 首版不提供 `mark-verified` 脚本；`verified` 必须由用户明确确认后编辑 Markdown，并通过 `lint` / `sync` 校验。
 - `promote-candidate` 写入前必须收到非空 `capabilities[]`，且每个 capability 至少包含一个真实 evidence；不得把 candidate 升级为空 context shell。
-- `promote-candidate` 可由 Yog skill 在用户确认后编排 subagent 并行收集业务边界、Serena 符号入口和 CodeGraph 代码证据，再一次性写入 context、capability、evidence 和 change record。
+- `promote-candidate` 可由 Yog skill 在用户确认后编排 subagent 并行收集业务边界和 CodeGraph 代码证据，再一次性写入 context、capability、evidence 和 change record。
 - 文档创建后由 Yog skill 调用 `build-index` 或 `sync`，但不自动把业务结论标记为已验证。
 - `match-scope` 不做 LLM 语义推理，不自动创建 context，不扫描或升级 candidate，不自动判定 `verified`。candidate 去重属于 `create-candidate` / candidate review workflow，不属于默认 `match-scope`。
 
@@ -655,9 +654,6 @@ Yog scripts 默认以结构化 JSON 和 agent 通信。Yog skill 负责把脚本
 {
   "schemaVersion": 1,
   "knowledgeRoot": "docs/knowledge",
-  "serena": {
-    "enabled": true
-  },
   "codeFactProvider": {
     "type": "codegraph",
     "status": "configured"
@@ -670,7 +666,7 @@ Yog scripts 默认以结构化 JSON 和 agent 通信。Yog skill 负责把脚本
 - `.yog/config.json` 可提交。
 - `.yog/local.json`、`.yog/*.local.json`、`.yog/cache/`、`.yog/tmp/` 必须被忽略。
 - 配置只保存团队共享偏好，不保存本机路径、token、cache 或临时目录。
-- `codeFactProvider.type` 可为 `none`、`codegraph`、`gitnexus`、`serena`、`repo-scan`。
+- `codeFactProvider.type` 可为 `none`、`codegraph`、`repo-scan`。
 - `codeFactProvider.status` 可为 `not-configured`、`configured`、`unavailable`。
 - provider 选择不写入 managed prompt block。
 - managed prompt block 只保存 agent 行为引导。
@@ -728,7 +724,7 @@ Yog 不要求用户手动执行路由工具。用户以自然语言和 agent 对
 12. 优先读取 `verified` capability 和 `accepted` ADR。
 13. 需要实现事实时读取 linked evidence。
 14. 只命中 `needs-review` 时，必须说明业务边界尚未确认。
-15. 做当前代码事实判断前，使用 Serena、CodeGraph、GitNexus、仓库扫描或测试验证。
+15. 做当前代码事实判断前，使用 CodeGraph、仓库扫描或测试验证。调用链和符号证据优先使用 CodeGraph。
 16. 如代码事实与知识库冲突，以当前代码事实处理当前任务，并建议将相关知识文档标记为 `stale` 或 `needs-review`。
 
 读取分支：
@@ -772,8 +768,7 @@ Yog 可以在用户确认后把 candidate 升级为正式 context。升级不能
 大型仓库中，Yog skill 可 spawn subagent 并行加速：
 
 - 业务边界 agent：复核 PRD、OpenSpec、candidate notes、业务术语和非职责。
-- Serena agent：定位符号、入口文件和代码归属边界。
-- CodeGraph agent：核验 routes、services、mappers、call paths 和代码事实。
+- CodeGraph agent：定位符号、入口文件和代码归属边界，并核验 routes、services、mappers、call paths 和代码事实。
 
 升级动作：
 
@@ -969,7 +964,7 @@ skills/yog/
 - 重复执行 `init` 脚本幂等。
 - `init` 脚本默认不覆盖已有用户文件。
 - `init` 遇到已有模板文件时跳过并返回 warning。
-- 未安装 GitNexus、CodeGraph 或 Serena 时，`init` 脚本仍可成功。
+- 未初始化 CodeGraph 时，`init` 脚本仍可成功。
 - `.yog/config.json` 只包含非敏感配置。
 - `AGENTS.md` 和 `CLAUDE.md` managed block 指向 `docs/knowledge` 工作流。
 - `AGENTS.md` 和 `CLAUDE.md` 中的 Yog managed block 内容完全一致。
@@ -1109,14 +1104,14 @@ skills/yog/
 
 - 自动创建 context 会把代码猜测固化成业务边界。
 - managed block 不够明确时，agent 可能跳过知识库直接搜代码。
-- provider 配置如果成为 `init` 硬依赖，会阻碍团队先从纯业务文档开始；但自动 `discover-candidates` 必须把 Serena 和 CodeGraph 作为硬前置，避免弱扫描污染候选区。
+- provider 配置如果成为 `init` 硬依赖，会阻碍团队先从纯业务文档开始；但自动 `discover-candidates` 必须把 CodeGraph 作为硬前置，避免弱扫描污染候选区。
 - `verified` 如果太容易赋值，会把未经确认的代码事实变成业务事实。
 - 公开命令面过多会增加用户心智负担，削弱 agent-first 的使用体验。
 - hook、CI 或定时审计如果自动改写业务结论，会把实现变化误提升为业务设计。
 
 ## 18. 后续问题
 
-- 第二阶段是否补充 GitNexus adapter；自动 `discover-candidates` 首版以 Serena + CodeGraph 作为硬前置。
+- 第二阶段是否补充其他代码事实 adapter；自动 `discover-candidates` 首版以 CodeGraph 作为硬前置。
 - `prd` evidence 首先只支持本地归档 Markdown，还是同时支持 OpenSpec 结构。
 - warning-only knowledge impact hook 是否进入第二阶段首批能力。
 - PR/MR 门禁何时从 warning 升级为阻断。

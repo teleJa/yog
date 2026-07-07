@@ -8,10 +8,10 @@ export function managedBlock(knowledgeRoot = 'docs/knowledge') {
 Yog knowledge routing rules:
 - ${routingCoreInstruction(knowledgeRoot)}
 - If no context matches, use ${knowledgeRoot}/INDEX.md for routing, then explore code and docs directly.
-- Use CodeGraph, Serena, GitNexus, repository scans, or tests to verify current code facts. If code facts conflict with ${knowledgeRoot}, use current code facts for the task and recommend marking the stale knowledge.
+- Use CodeGraph, repository scans, or tests to verify current code facts. Prefer CodeGraph for call-chain and symbol evidence. If code facts conflict with ${knowledgeRoot}, use current code facts for the task and recommend marking the stale knowledge.
 - After a change lands, re-check the evidence documents you relied on. If the change made them inaccurate, update them or mark them stale.
 - To make this routing reminder automatic on every prompt, ask Yog to run install-hooks. The hook is optional and non-blocking.
-- Run automatic discover-candidates only when Serena is available and CodeGraph is initialized for this repository; otherwise ask to install or initialize the missing tool first.
+- Run automatic discover-candidates only when CodeGraph is initialized for this repository; otherwise ask to initialize CodeGraph first.
 ${MANAGED_BLOCK_END}`;
 }
 

@@ -94,16 +94,15 @@ Do not run a one-time full extraction that creates empty placeholder contexts. N
 
 ## Init And Candidate Discovery
 
-Init creates the knowledge-base skeleton only. It does not require Serena or CodeGraph and does not create business contexts, capabilities, evidence, or candidates.
+Init creates the knowledge-base skeleton only. It does not require CodeGraph and does not create business contexts, capabilities, evidence, or candidates.
 
-Automatic candidate discovery starts after init and has a stricter gate. It requires both:
+Automatic candidate discovery starts after init and has a stricter gate. It requires:
 
-- Serena available to the agent for this repository.
 - CodeGraph initialized for this repository and able to answer code-structure queries.
 
-If either tool is missing or not initialized, stop automatic discovery and install or initialize the missing tool first. Do not fall back to filename-only or `rg`-only discovery for automatic candidates.
+If CodeGraph is missing or not initialized, stop automatic discovery and initialize CodeGraph first. Do not fall back to filename-only or `rg`-only discovery for automatic candidates.
 
-When both tools are available, the agent may run `discover-candidates` by combining existing business docs, OpenSpec changes, Serena navigation, and CodeGraph call or symbol evidence. Discovery may write `needs-review` candidate documents under `candidates/*.md`, but candidates remain outside generated routing indexes until a human confirms the boundary and promotes them into formal contexts.
+When CodeGraph is available, the agent may run `discover-candidates` by combining existing business docs, OpenSpec changes, and CodeGraph call or symbol evidence. Discovery may write `needs-review` candidate documents under `candidates/*.md`, but candidates remain outside generated routing indexes until a human confirms the boundary and promotes them into formal contexts.
 
 If discovery finds more than 10 candidates, stop before writing and ask the user to narrow the scope. Duplicate candidates must not be overwritten or merged automatically.
 

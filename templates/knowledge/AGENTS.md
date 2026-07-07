@@ -17,12 +17,12 @@ These rules apply only to files under `docs/knowledge/**`.
 
 ## Code Facts
 
-- Verify implementation facts with CodeGraph, Serena, GitNexus, repository scans, or tests before making code-fact claims.
+- Verify implementation facts with CodeGraph, repository scans, or tests before making code-fact claims. Prefer CodeGraph for call-chain and symbol evidence.
 - To make Yog routing reminders active on every prompt, ask Yog to run `install-hooks`; this step is optional and separate from init.
-- Automatic `discover-candidates` requires both Serena and CodeGraph for this repository.
+- Automatic `discover-candidates` requires CodeGraph for this repository.
 - Automatic `discover-candidates` uses 3 read-only code evidence lenses, reduce JOIN, and batch writing; each writable candidate must have canonical code symbols.
 - Prefer `identity_symbols` for narrow JOIN identity and `supporting_symbols` for extra evidence that must not merge candidates.
-- If either tool is unavailable, stop automatic discovery and tell the user what must be installed or initialized.
+- If CodeGraph is unavailable, stop automatic discovery and tell the user it must be initialized.
 - Do not fall back to filename-only or `rg`-only discovery for automatic candidate creation.
 
 ## Editing

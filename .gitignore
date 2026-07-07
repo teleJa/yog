@@ -8,6 +8,5 @@
 .yog/*.local.json
 .yog/cache/
 .yog/tmp/
-.serena
 .idea
 .goal

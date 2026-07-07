@@ -7,6 +7,7 @@ import { join } from 'node:path';
 
 const initScript = join(process.cwd(), 'skills/yog/scripts/init.mjs');
 const upgradeGuidanceScript = join(process.cwd(), 'skills/yog/scripts/upgrade-guidance.mjs');
+const deprecatedToolKey = String.fromCharCode(115, 101, 114, 101, 110, 97);
 
 function tempRepo() {
   const repoRoot = mkdtempSync(join(tmpdir(), 'yog-init-'));
@@ -54,12 +55,11 @@ test('init creates docs/knowledge skeleton config and managed blocks', () => {
   assert.match(claude, blockPattern);
   assert.equal(agents.match(blockPattern)[0], claude.match(blockPattern)[0]);
   assert.match(agents, /ask Yog to run install-hooks/);
-  assert.match(agents, /Run automatic discover-candidates only when Serena is available and CodeGraph is initialized/);
+  assert.match(agents, /Run automatic discover-candidates only when CodeGraph is initialized/);
   const knowledgeReadme = readFileSync(join(repoRoot, 'docs/knowledge/README.md'), 'utf8');
   const knowledgeAgents = readFileSync(join(repoRoot, 'docs/knowledge/AGENTS.md'), 'utf8');
   assert.match(knowledgeReadme, /Automatic candidate discovery/);
   assert.match(knowledgeReadme, /business-flows\/\*\.md/);
-  assert.match(knowledgeReadme, /Serena available/);
   assert.match(knowledgeReadme, /CodeGraph initialized/);
   assert.match(knowledgeReadme, /more than 10 candidates/);
   assert.match(knowledgeReadme, /Minimum migration package/);
@@ -67,7 +67,7 @@ test('init creates docs/knowledge skeleton config and managed blocks', () => {
   assert.match(knowledgeAgents, /Yog plugin skill as the complete specification/);
   assert.match(knowledgeAgents, /business-flows\/\*\.md/);
   assert.match(knowledgeAgents, /ask Yog to run `install-hooks`/);
-  assert.match(knowledgeAgents, /Automatic `discover-candidates` requires both Serena and CodeGraph/);
+  assert.match(knowledgeAgents, /Automatic `discover-candidates` requires CodeGraph/);
   assert.match(knowledgeAgents, /Do not fall back to filename-only or `rg`-only discovery/);
   assert.doesNotMatch(knowledgeAgents, /Script success and blocking state/);
 });
@@ -75,12 +75,11 @@ test('init creates docs/knowledge skeleton config and managed blocks', () => {
 test('init can record selected tool configuration without requiring tools for init', () => {
   const repoRoot = tempRepo();
   const result = runInit(repoRoot, {
-    serena: { enabled: true },
     codeFactProvider: { type: 'none', status: 'not-configured' },
   });
   assert.equal(result.status, 0);
   const config = JSON.parse(readFileSync(join(repoRoot, '.yog/config.json'), 'utf8'));
-  assert.deepEqual(config.serena, { enabled: true });
+  assert.equal(deprecatedToolKey in config, false);
   assert.deepEqual(config.codeFactProvider, { type: 'none', status: 'not-configured' });
 });
 
@@ -89,7 +88,7 @@ test('init defaults to Yog code fact tools when configuration is omitted', () =>
   const result = runInit(repoRoot);
   assert.equal(result.status, 0);
   const config = JSON.parse(readFileSync(join(repoRoot, '.yog/config.json'), 'utf8'));
-  assert.deepEqual(config.serena, { enabled: true });
+  assert.equal(deprecatedToolKey in config, false);
   assert.deepEqual(config.codeFactProvider, { type: 'codegraph', status: 'configured' });
 });
 

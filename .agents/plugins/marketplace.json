@@ -8,7 +8,7 @@
       "name": "yog",
       "source": {
         "source": "local",
-        "path": "./plugins/yog"
+        "path": "."
       },
       "policy": {
         "installation": "AVAILABLE",
