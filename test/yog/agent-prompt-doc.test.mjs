@@ -35,7 +35,15 @@ test('onboarding prompt guides install init and discover confirmation only', () 
   assert.match(onboardingPrompt, /3\. 初始化完成后，交互式询问我是否执行 `discover-candidates`/);
   assert.match(onboardingPrompt, /请只围绕以下 3 个任务推进/);
   assert.match(onboardingPrompt, /不要扩展到候选提升、business-flow 创建、召回测试或 overlap 校准/);
-  assert.match(onboardingPrompt, /停下来询问我是否现在执行 `discover-candidates`/);
+  assert.match(onboardingPrompt, /直接调用已暴露的 Yog skill/);
+  assert.match(onboardingPrompt, /`yog:init`/);
+  assert.match(onboardingPrompt, /`yog:discover-candidates`/);
+  assert.match(onboardingPrompt, /`yog:business-flow`/);
+  assert.match(onboardingPrompt, /`yog:sync-verify`/);
+  assert.match(onboardingPrompt, /停下来询问我是否现在调用 `yog:discover-candidates`/);
+  assert.match(onboardingPrompt, /不要在本引导文档里手动复刻 `yog:discover-candidates` 的内部脚本顺序/);
+  assert.match(onboardingPrompt, /后续可直接调用的 Yog 入口/);
+  assert.doesNotMatch(onboardingPrompt, /主 agent 收集结果后走 `reduce-candidates\.mjs`/);
 });
 
 test('GitHub marketplace manifest points at repository root plugin', () => {
