@@ -1504,6 +1504,113 @@ function evidenceStatusDecisions(capability, qualityIssues) {
   });
 }
 
+function hasRoutesOnlyQuality(qualityIssues) {
+  return qualityIssues.some((issue) => issue.code === 'routes-only');
+}
+
+function shallowDraftGateIssues(payload, qualityIssues) {
+  if (!hasRoutesOnlyQuality(qualityIssues) || payload.allowShallowDraft === true) return [];
+  return [inputIssue('routes-only promotion is a shallow draft; pass allowShallowDraft: true to write it explicitly, or use deep-promote-candidate with call-flow/data/external evidence.', {
+    field: 'allowShallowDraft',
+    code: 'routes-only-requires-explicit-shallow-draft',
+  })];
+}
+
+function promotionModeFor(qualityIssues, allowShallowDraft) {
+  if (hasRoutesOnlyQuality(qualityIssues)) return allowShallowDraft ? 'shallow-draft' : 'blocked-shallow-draft';
+  return qualityIssues.length > 0 ? 'draft-with-quality-issues' : 'deep-promote';
+}
+
+function renderJsonBlock(value) {
+  return `\`\`\`json\n${JSON.stringify(value, null, 2)}\n\`\`\``;
+}
+
+function renderPromoteQualityReport({ promotionMode, shallowDraft, qualityIssues, statusDecisions, evidenceDepth, guidanceIssues, guidanceAccepted }) {
+  return [
+    `- promotionMode: ${promotionMode}`,
+    `- shallowDraft: ${shallowDraft ? 'true' : 'false'}`,
+    '',
+    '### qualityIssues',
+    '',
+    renderJsonBlock(qualityIssues),
+    '',
+    '### statusDecisions',
+    '',
+    renderJsonBlock(statusDecisions),
+    '',
+    '### evidenceDepth',
+    '',
+    renderJsonBlock(evidenceDepth),
+    '',
+    '### guidanceIssues',
+    '',
+    renderJsonBlock(guidanceIssues),
+    '',
+    '### guidanceAccepted',
+    '',
+    renderJsonBlock(guidanceAccepted),
+  ].join('\n');
+}
+
+function planCandidateFromCapability(capability) {
+  return {
+    capabilityId: capability.capabilityId,
+    name: capability.name,
+    summary: capability.summary,
+    entryPaths: normalizeList(capability.entryPaths),
+    serviceRoots: normalizeList(capability.serviceRoots),
+    dataObjects: normalizeList(capability.dataObjects),
+    externalDependencies: normalizeList(capability.externalDependencies),
+    operations: normalizeList(capability.operations).length > 0 ? normalizeList(capability.operations) : normalizeList(capability.name),
+    confidence: capability.confidence ?? 'draft',
+    splitConfirmationReason: capability.splitConfirmationReason,
+    noSplitReason: capability.noSplitReason,
+  };
+}
+
+function materializeDeepCapabilityPlan(payload, contextId, capabilities) {
+  const existingPlan = normalizeCapabilityPlan(payload);
+  if (existingPlan) return { plan: existingPlan, anchorOutput: null, planOutput: existingPlan, issues: [] };
+  const hasAnchorInputs = payload.anchors || payload.lenses || payload.lensOutputs || payload.sources || payload.candidate;
+  const anchorOutput = hasAnchorInputs ? extractPromoteAnchors({ payload: { ...payload, contextId } }).output : null;
+  const planInput = {
+    contextId,
+    anchors: anchorOutput?.anchors ?? [],
+    unassignedAnchors: anchorOutput?.unassignedAnchors ?? [],
+    capabilityCandidates: normalizeObjectList(payload.capabilityCandidates).length > 0
+      ? normalizeObjectList(payload.capabilityCandidates)
+      : capabilities.map(planCandidateFromCapability),
+    traceLimitations: payload.traceLimitations,
+    unassignedAnchorDecision: payload.unassignedAnchorDecision,
+  };
+  const planResult = planCapabilities({ payload: planInput });
+  return {
+    plan: planResult.output,
+    anchorOutput,
+    planOutput: planResult.output,
+    issues: planResult.code === 0 ? [] : (planResult.output.issues ?? []),
+  };
+}
+
+function deepEvidenceGateIssues(capabilities) {
+  return capabilities.flatMap((capability, index) => {
+    const depth = evidenceDepthForCapability(capability);
+    const missing = [
+      depth.callFlow ? null : 'call-flow',
+      depth.data ? null : 'data',
+      depth.external ? null : 'external',
+    ].filter(Boolean);
+    if (missing.length === 0) return [];
+    return [inputIssue(`deep-promote-candidate requires ${missing.join(', ')} evidence before writing capability ${capability.capabilityId}. Use promote-candidate with allowShallowDraft: true for an explicit shallow draft.`, {
+      field: `capabilities[${index}].evidence`,
+      code: 'deep-evidence-required',
+      capability: capability.capabilityId,
+      missingEvidenceKinds: missing,
+      evidenceDepth: depth,
+    })];
+  });
+}
+
 const GUIDANCE_ANCHOR_TYPES = new Set(['symbol', 'route', 'table', 'cache', 'topic', 'external']);
 
 function evidenceAnchorSet(capability) {
@@ -2082,6 +2189,24 @@ export function promoteCandidate(input) {
     statusFromQuality(capability.capabilityId, qualityIssues),
     ...evidenceStatusDecisions(capability, qualityIssues),
   ]);
+  const shallowDraft = hasRoutesOnlyQuality(qualityIssues);
+  const promotionMode = promotionModeFor(qualityIssues, payload.allowShallowDraft === true);
+  const shallowDraftIssues = shallowDraftGateIssues(payload, qualityIssues);
+  if (shallowDraftIssues.length > 0) {
+    return {
+      code: 2,
+      output: {
+        issues: shallowDraftIssues,
+        qualityIssues,
+        statusDecisions,
+        evidenceDepth,
+        guidanceIssues,
+        guidanceAccepted,
+        shallowDraft: true,
+        promotionMode,
+      },
+    };
+  }
   const targetIssueResult = assertTargetsDoNotExist([
     { abs: changePath, path: changeRelPath },
     { abs: join(knowledgeAbs, 'contexts', contextId, 'CONTEXT.md'), path: contextDocPath },
@@ -2192,7 +2317,18 @@ export function promoteCandidate(input) {
   changeMarkdown = injectAfterHeading(changeMarkdown, '变更来源', `Candidate \`${candidateRelPath}\` was promoted to formal context \`${contextDocPath}\` and then removed from candidates.`);
   changeMarkdown = injectAfterHeading(changeMarkdown, '可能影响的业务能力', createdCapabilityPaths.map((path) => `- ${path}`).join('\n'));
   changeMarkdown = injectAfterHeading(changeMarkdown, '可能影响的证据', createdEvidencePaths.map((path) => `- ${path}`).join('\n'));
-  changeMarkdown = injectAfterHeading(changeMarkdown, '建议操作', 'Run sync/verify and review the generated capability and evidence documents before marking anything verified.');
+  changeMarkdown = injectAfterHeading(changeMarkdown, '建议操作', shallowDraft
+    ? 'This write is an explicit shallow draft. Run deep-promote-candidate or add call-flow/data/external evidence before treating it as deep promotion.'
+    : 'Run sync/verify and review the generated capability and evidence documents before marking anything verified.');
+  changeMarkdown = `${changeMarkdown.trim()}\n\n## Promote 质量报告\n\n${renderPromoteQualityReport({
+    promotionMode,
+    shallowDraft,
+    qualityIssues,
+    statusDecisions,
+    evidenceDepth,
+    guidanceIssues,
+    guidanceAccepted,
+  })}\n`;
   writeMarkdown(changePath, changeMarkdown);
   return {
     code: 0,
@@ -2211,8 +2347,51 @@ export function promoteCandidate(input) {
       evidenceDepth,
       guidanceIssues,
       guidanceAccepted,
+      shallowDraft,
+      promotionMode,
       repoCommit: repoCommit ?? 'unknown',
       unknownRepoCommitEvidence: unknownRepoCommitEvidenceList,
+    },
+  };
+}
+
+export function deepPromoteCandidate(input) {
+  const payload = input.payload ?? {};
+  const contextId = payload.contextId ?? payload.candidateId;
+  const capabilities = payload.capabilities ?? [];
+  const planResult = materializeDeepCapabilityPlan(payload, contextId, capabilities);
+  const depth = Object.fromEntries(capabilities.map((capability) => [capability.capabilityId, evidenceDepthForCapability(capability)]));
+  const deepEvidenceIssues = deepEvidenceGateIssues(capabilities);
+  const issues = [...planResult.issues, ...deepEvidenceIssues];
+  if (issues.length > 0) {
+    return {
+      code: 2,
+      output: {
+        issues,
+        anchorOutput: planResult.anchorOutput,
+        capabilityPlan: planResult.planOutput,
+        evidenceDepth: depth,
+        shallowDraft: hasRoutesOnlyQuality(capabilities.flatMap((capability) => promoteQualityForCapability(contextId, capability, capabilities))),
+        promotionMode: 'blocked-deep-promote',
+      },
+    };
+  }
+  const result = promoteCandidate({
+    ...input,
+    payload: {
+      ...payload,
+      capabilityPlan: planResult.plan,
+      allowShallowDraft: false,
+    },
+  });
+  return {
+    code: result.code,
+    output: {
+      ...result.output,
+      anchorOutput: planResult.anchorOutput,
+      capabilityPlan: planResult.planOutput,
+      deepPromote: result.code === 0,
+      promotionMode: result.output?.promotionMode ?? (result.code === 0 ? 'deep-promote' : 'blocked-deep-promote'),
     },
   };
 }

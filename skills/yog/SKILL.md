@@ -48,7 +48,8 @@ Exit code `0` means completed, P2-only, or a partial-success gate that still all
 - `write-candidates.mjs`: write an allowed `reduce-candidates.mjs` result to `docs/knowledge/candidates/`, write `_gated/gated-candidates.md` when mid/low candidates are gated, and apply explicit batch duplicate decisions such as `acceptDistinct` or `updateExisting`.
 - `create-candidate.mjs`: create or update a `needs-review` candidate after receiving `candidateId`, `name`, `summary`, and real body content. New discover payloads may also include `triggerSignals`, `businessMeaning`, `possibleContexts`, `keywords`, `code_symbols`, `evidence`, `notFormalReason`, and `openQuestions`.
 - `create-context.mjs`: create a formal context after receiving confirmed boundary fields.
-- `promote-candidate.mjs`: promote an existing candidate to a formal context, create real capability and evidence documents, remove the candidate, and write a change record.
+- `deep-promote-candidate.mjs`: default orchestration entry for promoting a selected candidate into a formal deep context. It materializes or validates anchors and capability plan, blocks missing `call-flow` / `data` / `external` evidence, calls `promote-candidate.mjs`, and returns `promotionMode`, `shallowDraft`, `qualityIssues`, `statusDecisions`, and `evidenceDepth`.
+- `promote-candidate.mjs`: lower-level write entry that promotes an existing candidate after the caller has already assembled `capabilities[]` and `capabilityPlan`. Routes-only promotion is blocked unless `payload.allowShallowDraft: true` is passed explicitly; that output is marked `promotionMode: shallow-draft`.
 - `create-capability.mjs`: create a `draft` capability under an existing context.
 - `create-evidence.mjs`: create a `draft` evidence document under an existing capability.
 - `build-index.mjs`: rebuild global and context indexes.
@@ -133,13 +134,14 @@ After discovery, run `sync.mjs` and `verify.mjs`. The final report must include 
 
 Promoting a candidate to a formal context must not create an empty context shell. Before calling `promote-candidate.mjs`, gather enough real business boundary and code evidence to create at least one capability and at least one evidence document.
 
-Promotion is now a staged workflow:
+Promotion is now a staged workflow. For a user-selected candidate, prefer `deep-promote-candidate.mjs` as the default entry point. Use `promote-candidate.mjs` directly only for already-deepened payloads, or for an explicit shallow draft with `allowShallowDraft: true`.
 
 1. Run `extract-promote-anchors.mjs` or assemble the same structure from candidate notes and discover lens outputs. Keep entry paths, service roots, data objects, external dependencies, operations, source lenses, and unassigned anchors separate.
 2. Run `plan-capabilities.mjs` before writing documents. Do not write when the plan has no capability, a capability has no traceable anchor, or unassigned anchors lack an explicit decision.
 3. Deepen evidence for each planned capability. Prefer `call-flow`, `data`, and `external` evidence in addition to `routes`; routes-only is shallow evidence and must be reported as a quality issue.
 4. If the agent writes prescriptive guidance, provide structured guidance arrays with concrete anchors. The script validates schema and anchors; rejected guidance is not rendered and does not stamp `guidance_reviewed_at`.
-5. Call `promote-candidate.mjs` only after the plan and evidence are assembled. The payload must include `capabilityPlan` (or `planOutput` / `plan`) from `plan-capabilities.mjs`; direct candidate-to-doc promotion without a plan is rejected. The promote output must be treated as machine-readable: inspect `qualityIssues[]`, `statusDecisions[]`, `evidenceDepth`, `guidanceIssues[]`, `repoCommit`, and `unknownRepoCommitEvidence[]` in addition to document paths.
+5. Call `deep-promote-candidate.mjs` for normal promotion. It will materialize the same capability plan when possible and block before writing when deep evidence is incomplete.
+6. Call `promote-candidate.mjs` directly only after the plan and evidence are assembled. The payload must include `capabilityPlan` (or `planOutput` / `plan`) from `plan-capabilities.mjs`; direct candidate-to-doc promotion without a plan is rejected. Routes-only payloads must not be written unless the caller passes `allowShallowDraft: true`, and then the result is an explicit shallow draft rather than a deep promotion. The promote output must be treated as machine-readable: inspect `promotionMode`, `shallowDraft`, `qualityIssues[]`, `statusDecisions[]`, `evidenceDepth`, `guidanceIssues[]`, `repoCommit`, and `unknownRepoCommitEvidence[]` in addition to document paths.
 
 For large repositories, spawn focused subagents in parallel when useful:
 
@@ -148,11 +150,11 @@ For large repositories, spawn focused subagents in parallel when useful:
 
 Apply the Subagent Timeout Discipline above whenever these subagents are used. Record timed-out or missing subagent evidence in the final report instead of waiting indefinitely or blocking on agent cleanup.
 
-Do not promote if CodeGraph is required for the repository but unavailable. Stop and report the missing initialization step instead of creating placeholder capability or evidence documents.
+Do not deep-promote if CodeGraph is required for the repository but unavailable. Stop and report the missing initialization step instead of creating placeholder capability or evidence documents. If the user explicitly wants a partial artifact for review, use `promote-candidate.mjs` with `allowShallowDraft: true` and report `promotionMode: shallow-draft`.
 
 Call `promote-candidate.mjs` only after assembling a payload with `capabilities[]` and the matching `capabilityPlan`. Each capability must include real `capabilityId`, `name`, `summary`, `responsibilities`, `nonResponsibilities`, and `body`. Each capability must include at least one `evidence[]` item with real `evidenceKind`, `name`, `summary`, `source`, `generator`, `generation_evidence`, and `body`; include structured sections such as `entryPaths`, `routes`, `callRelations`, `dataMessages`, `externalDependencies`, `frontendEntries`, and `limitations` when available. `call-flow` evidence must use directed `Class#method -> Class#method` chains in `callRelations`. `external` is a first-class evidence kind for boundary-out dependencies and must record dependency anchors, callers, downstream interfaces, dependency type (`rpc`, `http-api`, `mq`, `cache`, `object-storage`, `file-service`, `third-party-sdk`, or `downstream-service`), trigger conditions, failure/timeout handling, boundary notes, and limitations.
 
-After promotion, run `sync.mjs` and `verify.mjs`. The final report must include `contextPath`, `capabilityPaths`, `evidencePaths`, `changePath`, `docsCount`, `candidateRemoved`, `qualityIssues[]`, `statusDecisions[]`, `evidenceDepth`, `guidanceIssues[]`, `repoCommit`, and `unknownRepoCommitEvidence[]`. If `docsCount` is 0, treat the promotion as failed and investigate before reporting completion. When git HEAD is available, explicit `repo_commit: unknown` is a write blocker; when git HEAD is unavailable, `unknownRepoCommitEvidence[]` lists the affected evidence paths and reason.
+After promotion, run `sync.mjs` and `verify.mjs`. The final report must include `contextPath`, `capabilityPaths`, `evidencePaths`, `changePath`, `docsCount`, `candidateRemoved`, `promotionMode`, `shallowDraft`, `qualityIssues[]`, `statusDecisions[]`, `evidenceDepth`, `guidanceIssues[]`, `repoCommit`, and `unknownRepoCommitEvidence[]`. If `docsCount` is 0, treat the promotion as failed and investigate before reporting completion. When `promotionMode` is `shallow-draft`, do not report deep promotion as complete; tell the user which evidence kinds are missing. When git HEAD is available, explicit `repo_commit: unknown` is a write blocker; when git HEAD is unavailable, `unknownRepoCommitEvidence[]` lists the affected evidence paths and reason.
 
 ## Post-generation Calibration
 

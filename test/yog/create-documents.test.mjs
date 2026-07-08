@@ -375,7 +375,62 @@ test('create-context does not overwrite existing context source files', () => {
   assert.match(readFileSync(join(repoRoot, 'docs/knowledge/contexts/order/CONTEXT.md'), 'utf8'), /Keep this content/);
 });
 
-test('promote-candidate creates context records change and removes candidate', () => {
+test('promote-candidate rejects routes-only promotion unless shallow draft is explicit', () => {
+  const repoRoot = tempRepo();
+  assert.equal(runScript(repoRoot, 'create-candidate', {
+    candidateId: 'refund',
+    name: 'Refund',
+    summary: 'Refund boundary candidate.',
+    keywords: ['refund'],
+    possible_contexts: ['order'],
+    body: 'Refund appears repeatedly in support requests and after-sales process reviews.',
+  }).status, 0);
+  const capabilities = [
+    {
+      capabilityId: 'refund-request',
+      name: 'Refund Request',
+      summary: 'Handle refund request intake and handoff.',
+      responsibilities: 'Own refund request business flow and status vocabulary.',
+      nonResponsibilities: 'Payment gateway settlement internals.',
+      body: 'Refund request starts from customer after-sales intent, records the request, and hands off to fulfillment review.',
+      entryPaths: ['RefundController#create'],
+      evidence: [
+        {
+          evidenceKind: 'routes',
+          name: 'Refund request routes',
+          summary: 'HTTP routes that enter refund request handling.',
+          source: 'repository',
+          generator: 'subagent-codegraph',
+          generation_evidence: 'CodeGraph inspected refund route and service entry points.',
+          body: 'Refund request route evidence links the HTTP entry to the refund request service.',
+          routes: '- POST /refunds',
+        },
+      ],
+    },
+  ];
+  const result = runScript(repoRoot, 'promote-candidate', {
+    candidateId: 'refund',
+    contextId: 'refund',
+    changeId: '20260708-promote-candidate-refund-shallow-blocked',
+    name: 'Refund',
+    summary: 'Refund context promoted from repeated candidate signals.',
+    responsibilities: 'Own refund business language.',
+    nonResponsibilities: 'Payment gateway settlement.',
+    body: 'Refund context covers refund request terminology, after-sales handoff, and status vocabulary.',
+    capabilityPlan: capabilityPlan('refund', capabilities),
+    capabilities,
+  });
+  assert.equal(result.status, 2);
+  const output = JSON.parse(result.stdout);
+  assert.match(output.issues[0].message, /routes-only promotion is a shallow draft/);
+  assert.equal(output.promotionMode, 'blocked-shallow-draft');
+  assert.equal(output.shallowDraft, true);
+  assert.equal(output.qualityIssues.some((issue) => issue.code === 'routes-only'), true);
+  assert.equal(existsSync(join(repoRoot, 'docs/knowledge/candidates/refund.md')), true);
+  assert.equal(existsSync(join(repoRoot, 'docs/knowledge/contexts/refund/CONTEXT.md')), false);
+});
+
+test('promote-candidate creates explicit shallow draft context records change and removes candidate', () => {
   const repoRoot = tempRepo();
   const candidate = runScript(repoRoot, 'create-candidate', {
     candidateId: 'refund',
@@ -423,6 +478,7 @@ test('promote-candidate creates context records change and removes candidate', (
     responsibilities: 'Own refund business language.',
     nonResponsibilities: 'Payment gateway settlement.',
     body: 'Refund context covers refund request terminology, after-sales handoff, and status vocabulary.',
+    allowShallowDraft: true,
     capabilityPlan: capabilityPlan('refund', capabilities),
     capabilities,
   });
@@ -437,6 +493,8 @@ test('promote-candidate creates context records change and removes candidate', (
   assert.equal(output.qualityIssues.some((issue) => issue.code === 'routes-only'), true);
   assert.deepEqual(output.evidenceDepth['refund-request'], { routes: true, callFlow: false, data: false, external: false });
   assert.equal(output.statusDecisions.some((decision) => decision.id === 'refund-request' && decision.status === 'draft'), true);
+  assert.equal(output.shallowDraft, true);
+  assert.equal(output.promotionMode, 'shallow-draft');
   assert.deepEqual(output.unknownRepoCommitEvidence, [
     {
       path: 'docs/knowledge/contexts/refund/evidence/refund-request-routes.md',
@@ -457,6 +515,10 @@ test('promote-candidate creates context records change and removes candidate', (
   assert.match(change, /Candidate `docs\/knowledge\/candidates\/refund\.md` was promoted/);
   assert.match(change, /docs\/knowledge\/contexts\/refund\/capabilities\/refund-request\.md/);
   assert.match(change, /docs\/knowledge\/contexts\/refund\/evidence\/refund-request-routes\.md/);
+  assert.match(change, /## Promote 质量报告/);
+  assert.match(change, /promotionMode: shallow-draft/);
+  assert.match(change, /"code": "routes-only"/);
+  assert.match(change, /"callFlow": false/);
   const capability = readFileSync(join(repoRoot, 'docs/knowledge/contexts/refund/capabilities/refund-request.md'), 'utf8');
   assert.match(capability, /待补充 call-flow evidence/);
   assert.doesNotMatch(capability, /Refund request starts from customer after-sales intent/);
@@ -585,6 +647,156 @@ test('promote-candidate writes grouped deduplicated context README upstream rela
   assert.match(external, /## 调用方\n\n- CourseLinkService#createCourseLink/);
   assert.match(external, /## 下游接口\n\n- FeishuLinkClient#createLink/);
   assert.match(external, /## 依赖类型\n\ndownstream-service/);
+});
+
+test('deep-promote-candidate rejects shallow routes-only evidence before writing', () => {
+  const repoRoot = tempRepo();
+  assert.equal(runScript(repoRoot, 'create-candidate', {
+    candidateId: 'refund-deep',
+    name: 'Refund Deep',
+    summary: 'Refund deep boundary candidate.',
+    body: 'Refund deep appears in route evidence.',
+  }).status, 0);
+  const capabilities = [
+    {
+      capabilityId: 'refund-request',
+      name: 'Refund Request',
+      summary: 'Handle refund request intake.',
+      responsibilities: 'Own refund request business flow.',
+      nonResponsibilities: 'Payment gateway settlement.',
+      body: 'Refund request starts from customer intent.',
+      entryPaths: ['RefundController#create'],
+      evidence: [
+        {
+          evidenceKind: 'routes',
+          name: 'Refund request routes',
+          summary: 'HTTP routes that enter refund request handling.',
+          source: 'repository',
+          generator: 'unit-test',
+          generation_evidence: 'Unit test evidence.',
+          body: 'Route evidence identifies refund request entry.',
+          routes: '- RefundController#create',
+        },
+      ],
+    },
+  ];
+  const result = runScript(repoRoot, 'deep-promote-candidate', {
+    candidateId: 'refund-deep',
+    contextId: 'refund-deep',
+    changeId: '20260708-deep-promote-candidate-refund',
+    name: 'Refund Deep',
+    summary: 'Refund deep context.',
+    responsibilities: 'Own refund language.',
+    nonResponsibilities: 'Payment gateway settlement.',
+    body: 'Refund deep context covers refund terminology.',
+    capabilities,
+  });
+  assert.equal(result.status, 2);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.promotionMode, 'blocked-deep-promote');
+  assert.match(output.issues.map((issue) => issue.message).join('\n'), /requires call-flow, data, external evidence/);
+  assert.equal(existsSync(join(repoRoot, 'docs/knowledge/candidates/refund-deep.md')), true);
+  assert.equal(existsSync(join(repoRoot, 'docs/knowledge/contexts/refund-deep/CONTEXT.md')), false);
+});
+
+test('deep-promote-candidate materializes plan and writes deep promotion with complete evidence', () => {
+  const repoRoot = tempRepo();
+  assert.equal(runScript(repoRoot, 'create-candidate', {
+    candidateId: 'course-link-deep',
+    name: 'Course Link Deep',
+    summary: 'Course link deep boundary candidate.',
+    body: 'Course link generation has route, call-flow, data, and external evidence.',
+  }).status, 0);
+  const capabilities = [
+    {
+      capabilityId: 'course-link-generation',
+      name: 'Course Link Generation',
+      summary: 'Generate course link from route to cache.',
+      responsibilities: 'Own course link generation flow.',
+      nonResponsibilities: 'Course content authoring.',
+      body: 'Course link generation starts from a route, reaches a service, and persists cache data.',
+      entryPaths: ['CourseLinkController#createCourseLink'],
+      serviceRoots: ['CourseLinkService#createCourseLink'],
+      dataObjects: ['CourseLinkCacheMapper'],
+      externalDependencies: ['FeishuLinkClient#createLink'],
+      noSplitReason: 'Unit test fixture covers a single focused capability.',
+      evidence: [
+        {
+          evidenceKind: 'routes',
+          name: 'Course link route',
+          summary: 'Route entry for course link generation.',
+          source: 'repository',
+          generator: 'unit-test',
+          generation_evidence: 'Unit test evidence.',
+          body: 'Route evidence identifies the external entry.',
+          routes: '- CourseLinkController#createCourseLink',
+        },
+        {
+          evidenceKind: 'call-flow',
+          name: 'Course link call flow',
+          summary: 'Service call flow for course link generation.',
+          source: 'repository',
+          generator: 'unit-test',
+          generation_evidence: 'Unit test evidence.',
+          body: 'Call-flow evidence tracks service orchestration.',
+          callRelations: '- CourseLinkController#createCourseLink -> CourseLinkService#createCourseLink\n- CourseLinkService#createCourseLink -> CourseLinkCacheMapper#selectAvailable',
+        },
+        {
+          evidenceKind: 'data',
+          name: 'Course link cache data',
+          summary: 'Cache dependency for course link generation.',
+          source: 'repository',
+          generator: 'unit-test',
+          generation_evidence: 'Unit test evidence.',
+          body: 'Data evidence records cache persistence dependency.',
+          dataMessages: '- course_link_cache.cache_key',
+        },
+        {
+          evidenceKind: 'external',
+          name: 'Course link external dependency',
+          summary: 'External dependency used while generating a course link.',
+          source: 'repository',
+          generator: 'unit-test',
+          generation_evidence: 'Unit test evidence.',
+          body: 'External evidence records downstream dependency used by course link generation.',
+          externalDependencies: '- FeishuLinkClient#createLink',
+          callers: '- CourseLinkService#createCourseLink',
+          downstreamInterfaces: '- FeishuLinkClient#createLink',
+          dependencyType: 'downstream-service',
+          triggerConditions: '- Course link generation requests a Feishu link.',
+          failureHandling: '- Static test fixture records timeout handling as pending.',
+          boundaryNotes: '- Feishu link creation remains a downstream dependency, not this capability main entry.',
+          callRelations: '- CourseLinkService#createCourseLink -> FeishuLinkClient#createLink',
+          limitations: '- Static trace stops at FeishuLinkClient.',
+        },
+      ],
+    },
+  ];
+  const result = runScript(repoRoot, 'deep-promote-candidate', {
+    candidateId: 'course-link-deep',
+    contextId: 'course-link-deep',
+    changeId: '20260708-deep-promote-candidate-course-link',
+    name: 'Course Link Deep',
+    summary: 'Course link deep context promoted from evidence.',
+    responsibilities: 'Own course link generation language.',
+    nonResponsibilities: 'Course content authoring.',
+    body: 'Course link deep context covers entry routes, service call flow, cache dependency, and downstream Feishu handoff.',
+    capabilities,
+  });
+  assert.equal(result.status, 0);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.deepPromote, true);
+  assert.equal(output.shallowDraft, false);
+  assert.equal(output.promotionMode, 'deep-promote');
+  assert.deepEqual(output.evidenceDepth['course-link-generation'], { routes: true, callFlow: true, data: true, external: true });
+  assert.equal(output.capabilityPlan.capabilityCandidates[0].capabilityId, 'course-link-generation');
+  assert.equal(existsSync(join(repoRoot, 'docs/knowledge/contexts/course-link-deep/evidence/course-link-generation-call-flow.md')), true);
+  assert.equal(existsSync(join(repoRoot, 'docs/knowledge/contexts/course-link-deep/evidence/course-link-generation-data.md')), true);
+  assert.equal(existsSync(join(repoRoot, 'docs/knowledge/contexts/course-link-deep/evidence/course-link-generation-external.md')), true);
+  const change = readFileSync(join(repoRoot, 'docs/knowledge/changes/20260708-deep-promote-candidate-course-link.md'), 'utf8');
+  assert.match(change, /promotionMode: deep-promote/);
+  assert.match(change, /"callFlow": true/);
+  assert.match(change, /"external": true/);
 });
 
 test('promote-candidate validates structured guidance anchors before rendering', () => {
@@ -889,6 +1101,7 @@ test('promote-candidate does not remove candidate when target context exists', (
           generator: 'subagent-codegraph',
           generation_evidence: 'CodeGraph inspected refund route and service entry points.',
           body: 'Refund request route evidence links the HTTP entry to the refund request service.',
+          routes: '- POST /refunds',
         },
       ],
     },
@@ -902,6 +1115,7 @@ test('promote-candidate does not remove candidate when target context exists', (
     responsibilities: 'Own refund business language.',
     nonResponsibilities: 'Payment gateway settlement.',
     body: 'Refund context covers refund request terminology, after-sales handoff, and status vocabulary.',
+    allowShallowDraft: true,
     capabilityPlan: capabilityPlan('refund', capabilities),
     capabilities,
   });
