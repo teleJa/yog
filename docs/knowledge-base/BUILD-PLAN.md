@@ -141,7 +141,7 @@ capability id 与 context id 使用同一规则：`[a-z][a-z0-9-]*`。capability
 
 evidence 不单独建模 evidence id，文件名就是稳定标识。文件名必须符合 `<capability-id>-<evidence-kind>.md`，其中 `evidence-kind` 符合 `[a-z][a-z0-9-]*`；文件名前缀 `<capability-id>` 必须等于 evidence frontmatter 的 `capability`。
 
-`evidence-kind` 表示证据切面，不表示生成方式。首版只允许 `routes`、`call-flow`、`data`、`prd`、`tests`、`ui`、`ops`。CodeGraph、`rg`、AST 扫描、人工整理等生成方式写入 `source`、`generator` 和 `generation_evidence`；frontmatter `evidence_kind` 必须等于文件名中的 `evidence-kind`。
+`evidence-kind` 表示证据切面，不表示生成方式。首版只允许 `routes`、`call-flow`、`data`、`external`、`prd`、`tests`、`ui`、`ops`。`call-flow` 的 `调用关系` 必须使用 `Class#method -> Class#method` 有向链路。`external` 用于记录边界外依赖，例如 RPC/HTTP 下游、MQ、cache、对象存储、文件服务、第三方 SDK 或 downstream service，并且必须包含依赖锚点、调用方、下游接口、依赖类型、触发条件、失败/超时处理、边界说明和限制。CodeGraph、`rg`、AST 扫描、人工整理等生成方式写入 `source`、`generator` 和 `generation_evidence`；frontmatter `evidence_kind` 必须等于文件名中的 `evidence-kind`。
 
 context index 的 evidence entry 必须包含 `evidenceKind`，由 Markdown frontmatter `evidence_kind` 生成，并等于文件名中的 `evidence-kind`。
 

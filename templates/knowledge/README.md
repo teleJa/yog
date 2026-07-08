@@ -296,7 +296,7 @@ Capability ids use the same rule as context ids: `[a-z][a-z0-9-]*`. The capabili
 
 Evidence files do not have a separate evidence id. The file name is the stable identifier and must use `<capability-id>-<evidence-kind>.md`, where `evidence-kind` also matches `[a-z][a-z0-9-]*`. The file-name prefix must match evidence frontmatter `capability`.
 
-`evidence-kind` describes the evidence slice, not how it was generated. Use only `routes`, `call-flow`, `data`, `prd`, `tests`, `ui`, or `ops`. Store generation method details in `source`, `generator`, and `generation_evidence`; frontmatter `evidence_kind` must equal the file-name `evidence-kind`.
+`evidence-kind` describes the evidence slice, not how it was generated. Use only `routes`, `call-flow`, `data`, `external`, `prd`, `tests`, `ui`, or `ops`. `call-flow` `调用关系` must use directed `Class#method -> Class#method` chains. Use `external` for boundary-out dependencies such as RPC/HTTP downstream calls, MQ, cache, object storage, file services, third-party SDKs, or downstream services; external evidence must include dependency anchors, callers, downstream interfaces, dependency type, trigger conditions, failure/timeout handling, boundary notes, and limitations. Store generation method details in `source`, `generator`, and `generation_evidence`; frontmatter `evidence_kind` must equal the file-name `evidence-kind`.
 
 Context index evidence entries include `evidenceKind`, generated from Markdown frontmatter `evidence_kind`. `evidenceKind` must also match the file-name evidence kind.
 

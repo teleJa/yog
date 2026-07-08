@@ -494,7 +494,7 @@ test('lint accepts evidence kinds that contain hyphens', () => {
     body: 'Refund call flow enters through the refund controller and reaches the refund service.',
     generationMethod: 'Created by regression test.',
     entryPaths: '- src/refund/controller.js',
-    callRelations: '- RefundController -> RefundService',
+    callRelations: '- RefundController#create -> RefundService#create',
     limitations: '- Test fixture does not execute runtime calls.',
   });
   assert.equal(evidenceResult.status, 0);

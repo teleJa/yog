@@ -133,6 +133,14 @@ After discovery, run `sync.mjs` and `verify.mjs`. The final report must include 
 
 Promoting a candidate to a formal context must not create an empty context shell. Before calling `promote-candidate.mjs`, gather enough real business boundary and code evidence to create at least one capability and at least one evidence document.
 
+Promotion is now a staged workflow:
+
+1. Run `extract-promote-anchors.mjs` or assemble the same structure from candidate notes and discover lens outputs. Keep entry paths, service roots, data objects, external dependencies, operations, source lenses, and unassigned anchors separate.
+2. Run `plan-capabilities.mjs` before writing documents. Do not write when the plan has no capability, a capability has no traceable anchor, or unassigned anchors lack an explicit decision.
+3. Deepen evidence for each planned capability. Prefer `call-flow`, `data`, and `external` evidence in addition to `routes`; routes-only is shallow evidence and must be reported as a quality issue.
+4. If the agent writes prescriptive guidance, provide structured guidance arrays with concrete anchors. The script validates schema and anchors; rejected guidance is not rendered and does not stamp `guidance_reviewed_at`.
+5. Call `promote-candidate.mjs` only after the plan and evidence are assembled. The payload must include `capabilityPlan` (or `planOutput` / `plan`) from `plan-capabilities.mjs`; direct candidate-to-doc promotion without a plan is rejected. The promote output must be treated as machine-readable: inspect `qualityIssues[]`, `statusDecisions[]`, `evidenceDepth`, `guidanceIssues[]`, `repoCommit`, and `unknownRepoCommitEvidence[]` in addition to document paths.
+
 For large repositories, spawn focused subagents in parallel when useful:
 
 - one subagent verifies business boundary, terms, responsibilities, and non-responsibilities from existing docs, PRDs, OpenSpec, and candidate notes;
@@ -142,9 +150,9 @@ Apply the Subagent Timeout Discipline above whenever these subagents are used. R
 
 Do not promote if CodeGraph is required for the repository but unavailable. Stop and report the missing initialization step instead of creating placeholder capability or evidence documents.
 
-Call `promote-candidate.mjs` only after assembling a payload with `capabilities[]`. Each capability must include real `capabilityId`, `name`, `summary`, `responsibilities`, `nonResponsibilities`, and `body`. Each capability must include at least one `evidence[]` item with real `evidenceKind`, `name`, `summary`, `source`, `generator`, `generation_evidence`, and `body`; include structured sections such as `entryPaths`, `routes`, `callRelations`, `dataMessages`, `frontendEntries`, and `limitations` when available.
+Call `promote-candidate.mjs` only after assembling a payload with `capabilities[]` and the matching `capabilityPlan`. Each capability must include real `capabilityId`, `name`, `summary`, `responsibilities`, `nonResponsibilities`, and `body`. Each capability must include at least one `evidence[]` item with real `evidenceKind`, `name`, `summary`, `source`, `generator`, `generation_evidence`, and `body`; include structured sections such as `entryPaths`, `routes`, `callRelations`, `dataMessages`, `externalDependencies`, `frontendEntries`, and `limitations` when available. `call-flow` evidence must use directed `Class#method -> Class#method` chains in `callRelations`. `external` is a first-class evidence kind for boundary-out dependencies and must record dependency anchors, callers, downstream interfaces, dependency type (`rpc`, `http-api`, `mq`, `cache`, `object-storage`, `file-service`, `third-party-sdk`, or `downstream-service`), trigger conditions, failure/timeout handling, boundary notes, and limitations.
 
-After promotion, run `sync.mjs` and `verify.mjs`. The final report must include `contextPath`, `capabilityPaths`, `evidencePaths`, `changePath`, `docsCount`, and `candidateRemoved`. If `docsCount` is 0, treat the promotion as failed and investigate before reporting completion.
+After promotion, run `sync.mjs` and `verify.mjs`. The final report must include `contextPath`, `capabilityPaths`, `evidencePaths`, `changePath`, `docsCount`, `candidateRemoved`, `qualityIssues[]`, `statusDecisions[]`, `evidenceDepth`, `guidanceIssues[]`, `repoCommit`, and `unknownRepoCommitEvidence[]`. If `docsCount` is 0, treat the promotion as failed and investigate before reporting completion. When git HEAD is available, explicit `repo_commit: unknown` is a write blocker; when git HEAD is unavailable, `unknownRepoCommitEvidence[]` lists the affected evidence paths and reason.
 
 ## Post-generation Calibration
 

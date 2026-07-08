@@ -15,6 +15,16 @@ test('user manual documents plugin installation and update workflow', () => {
   assert.match(userManual, /codex plugin list/);
   assert.match(userManual, /当前会话是否已加载 `yog` skill/);
   assert.match(userManual, /不要把 Yog 内部 Node 脚本当作插件安装入口/);
+  assert.match(userManual, /已暴露的 Yog skill/);
+  assert.match(userManual, /`yog:init`/);
+  assert.match(userManual, /`yog:discover-candidates`/);
+  assert.match(userManual, /`yog:business-flow`/);
+  assert.match(userManual, /`yog:sync-verify`/);
+  assert.match(userManual, /不要在用户手册里手动复刻 `yog:discover-candidates` 的内部脚本顺序/);
+  assert.doesNotMatch(userManual, /本地 marketplace wrapper/);
+  assert.doesNotMatch(userManual, /确认 Yog 仓库已克隆/);
+  assert.doesNotMatch(userManual, /将 3 个 subagent 输出交给 `reduce-candidates\.mjs`/);
+  assert.doesNotMatch(userManual, /再用 `write-candidates\.mjs` 写入/);
 });
 
 test('onboarding prompt guides install init and discover confirmation only', () => {

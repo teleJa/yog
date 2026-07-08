@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -355,7 +356,7 @@ function validateCapabilityPayload(capability, prefix = 'capability') {
 }
 
 function validateEvidencePayload(evidence, prefix = 'evidence') {
-  return [
+  const issues = [
     !EVIDENCE_KINDS.includes(evidence?.evidenceKind) ? inputIssue(`${prefix}.evidenceKind is not supported.`, { field: `${prefix}.evidenceKind` }) : null,
     !evidence?.name ? inputIssue(`${prefix}.name is required.`, { field: `${prefix}.name` }) : null,
     !evidence?.summary ? inputIssue(`${prefix}.summary is required.`, { field: `${prefix}.summary` }) : null,
@@ -364,6 +365,43 @@ function validateEvidencePayload(evidence, prefix = 'evidence') {
     !evidence?.generation_evidence ? inputIssue(`${prefix}.generation_evidence is required.`, { field: `${prefix}.generation_evidence` }) : null,
     assertRealBody(evidence?.body, `${prefix}.body`),
   ].filter(Boolean);
+  if (evidence?.evidenceKind === 'call-flow') issues.push(...validateCallFlowEvidence(evidence, prefix));
+  if (evidence?.evidenceKind === 'external') issues.push(...validateExternalEvidence(evidence, prefix));
+  return issues;
+}
+
+function validateCallFlowEvidence(evidence, prefix) {
+  const lines = uniqueLines([evidence.callRelations]);
+  const chainPattern = /^[A-Z][$A-Za-z0-9_]*#[A-Za-z_$][$A-Za-z0-9_]*(?:\s*->\s*[A-Z][$A-Za-z0-9_]*#[A-Za-z_$][$A-Za-z0-9_]*)+$/;
+  if (lines.length === 0) {
+    return [inputIssue(`${prefix}.callRelations is required for call-flow evidence.`, { field: `${prefix}.callRelations` })];
+  }
+  if (lines.some((line) => !chainPattern.test(line.replace(/^[-*]\s+/, '').trim()))) {
+    return [inputIssue(`${prefix}.callRelations must contain directed Class#method -> Class#method chains.`, { field: `${prefix}.callRelations` })];
+  }
+  return [];
+}
+
+const EXTERNAL_DEPENDENCY_TYPES = new Set(['rpc', 'http-api', 'mq', 'cache', 'object-storage', 'file-service', 'third-party-sdk', 'downstream-service']);
+
+function validateExternalEvidence(evidence, prefix) {
+  const required = [
+    ['dependencyAnchors', evidence.dependencyAnchors ?? evidence.externalDependencies],
+    ['callers', evidence.callers],
+    ['downstreamInterfaces', evidence.downstreamInterfaces],
+    ['dependencyType', evidence.dependencyType],
+    ['triggerConditions', evidence.triggerConditions],
+    ['failureHandling', evidence.failureHandling],
+    ['boundaryNotes', evidence.boundaryNotes],
+    ['limitations', evidence.limitations],
+  ];
+  const issues = required
+    .filter(([, value]) => !asText(value))
+    .map(([field]) => inputIssue(`${prefix}.${field} is required for external evidence.`, { field: `${prefix}.${field}` }));
+  if (evidence.dependencyType && !EXTERNAL_DEPENDENCY_TYPES.has(evidence.dependencyType)) {
+    issues.push(inputIssue(`${prefix}.dependencyType is not supported.`, { field: `${prefix}.dependencyType`, allowed: [...EXTERNAL_DEPENDENCY_TYPES] }));
+  }
+  return issues;
 }
 
 function validatePromoteKnowledgePayload(capabilities) {
@@ -1023,6 +1061,7 @@ function evidenceSectionFallback(evidenceKind, heading) {
     调用关系: '本证据类型未覆盖调用关系；如需要该事实，请补充 call-flow evidence。',
     '数据 / 消息': '本证据类型未覆盖数据或消息结构；如需要该事实，请补充 data evidence。',
     前端入口: '本轮未发现或未覆盖前端入口；如需要该事实，请补充 ui evidence 或前端路径证据。',
+    边界外依赖: '本证据类型未覆盖边界外依赖；如需要该事实，请补充 external evidence。',
   };
   return descriptions[heading] ?? `本 ${evidenceKind} evidence 未覆盖该章节。`;
 }
@@ -1071,6 +1110,14 @@ function collectEvidenceSection(capability, field) {
     .join('\n');
 }
 
+function collectEvidenceKindSection(capability, evidenceKind, field) {
+  return (capability.evidence ?? [])
+    .filter((evidence) => evidence.evidenceKind === evidenceKind)
+    .map((evidence) => asText(evidence[field]))
+    .filter(Boolean)
+    .join('\n');
+}
+
 function uniqueLines(values) {
   const seen = new Set();
   return values
@@ -1082,6 +1129,247 @@ function uniqueLines(values) {
       seen.add(line);
       return true;
     });
+}
+
+function normalizeObjectList(value) {
+  if (!value) return [];
+  return Array.isArray(value) ? value.filter((item) => item && typeof item === 'object') : [value].filter((item) => item && typeof item === 'object');
+}
+
+function normalizeAnchorList(...values) {
+  return uniquePreserve(values.flatMap((value) => normalizeList(value)));
+}
+
+function anchorFromLensItem(item) {
+  return {
+    entryPath: normalizeAnchorList(item.entryPath, item.entryPaths, item.controller, item.controllers),
+    serviceRoots: normalizeAnchorList(item.serviceRoot, item.serviceRoots, item.service, item.services, item.callRelations),
+    dataObjects: normalizeAnchorList(item.dataObject, item.dataObjects, item.mapper, item.mappers, item.entity, item.entities, item.table, item.tables, item.dataMessages),
+    externalDependencies: normalizeAnchorList(item.externalDependency, item.externalDependencies, item.downstream, item.downstreams, item.rpc, item.topic, item.cache),
+    operations: normalizeAnchorList(item.operation, item.operations, item.name, item.summary),
+  };
+}
+
+function mergeAnchor(target, source, sourceLens) {
+  for (const field of ['entryPath', 'serviceRoots', 'dataObjects', 'externalDependencies', 'operations']) {
+    target[field] = uniquePreserve([...(target[field] ?? []), ...(source[field] ?? [])]);
+  }
+  target.sourceLens = uniquePreserve([...(target.sourceLens ?? []), sourceLens].filter(Boolean));
+  return target;
+}
+
+function hasAnyTraceableAnchor(candidate) {
+  return ['entryPaths', 'serviceRoots', 'dataObjects', 'externalDependencies']
+    .some((field) => normalizeList(candidate?.[field]).length > 0);
+}
+
+function anchorKey(anchor) {
+  return normalizeDuplicateToken([
+    ...normalizeList(anchor.entryPath),
+    ...normalizeList(anchor.serviceRoots),
+    ...normalizeList(anchor.dataObjects),
+    ...normalizeList(anchor.externalDependencies),
+  ][0] ?? normalizeList(anchor.operations)[0] ?? 'unassigned');
+}
+
+function normalizeTraceLimitation(item, index, issues, prefix = 'traceLimitations') {
+  const allowedAnchorTypes = ['entryPath', 'serviceRoot', 'dataObject', 'externalDependency'];
+  const allowedReasons = ['dynamic-dispatch', 'reflection', 'framework-callback', 'missing-index', 'source-unavailable', 'ambiguous-symbol'];
+  const allowedDecisions = ['pending', 'allow', 'reject', 'needs-more-evidence'];
+  const limitation = {
+    anchor: String(item?.anchor ?? '').trim(),
+    anchorType: item?.anchorType,
+    reason: item?.reason,
+    impact: String(item?.impact ?? '').trim(),
+    manualDecision: item?.manualDecision ?? 'pending',
+    note: item?.note,
+    decidedBy: item?.decidedBy,
+    decidedAt: item?.decidedAt,
+  };
+  const field = `${prefix}[${index}]`;
+  if (!limitation.anchor) issues.push(inputIssue(`${field}.anchor is required.`, { field: `${field}.anchor` }));
+  if (limitation.anchorType && !allowedAnchorTypes.includes(limitation.anchorType)) issues.push(inputIssue(`${field}.anchorType is not supported.`, { field: `${field}.anchorType` }));
+  if (!allowedReasons.includes(limitation.reason)) issues.push(inputIssue(`${field}.reason is not supported.`, { field: `${field}.reason` }));
+  if (!limitation.impact) issues.push(inputIssue(`${field}.impact is required.`, { field: `${field}.impact` }));
+  if (!allowedDecisions.includes(limitation.manualDecision)) issues.push(inputIssue(`${field}.manualDecision is not supported.`, { field: `${field}.manualDecision` }));
+  if (limitation.manualDecision === 'allow' && (!limitation.decidedBy || !limitation.decidedAt)) {
+    issues.push(inputIssue(`${field}.decidedBy and ${field}.decidedAt are required when manualDecision is allow.`, { field }));
+  }
+  return Object.fromEntries(Object.entries(limitation).filter(([, value]) => value !== undefined && value !== ''));
+}
+
+export function extractPromoteAnchors(input = {}) {
+  const payload = input.payload ?? input;
+  const contextId = payload.contextId ?? payload.candidateId ?? '';
+  const rawLenses = payload.lenses ?? payload.lensOutputs ?? payload.sources ?? [];
+  const anchorsByKey = new Map();
+  const unassignedAnchors = [];
+  const items = [
+    ...normalizeObjectList(payload.candidate).map((item) => ({ item, lens: 'candidate' })),
+    ...normalizeObjectList(payload).filter((item) => item !== payload).map((item) => ({ item, lens: 'payload' })),
+    ...normalizeObjectList(rawLenses).flatMap((lens, lensIndex) => {
+      const lensName = lens.agent ?? lens.lens ?? lens.name ?? `lens-${lensIndex + 1}`;
+      return [
+        ...normalizeObjectList(lens),
+        ...normalizeObjectList(lens.candidates),
+        ...normalizeObjectList(lens.anchors),
+        ...normalizeObjectList(lens.items),
+      ].map((item) => ({ item, lens: lensName }));
+    }),
+  ];
+  for (const { item, lens } of items) {
+    const anchor = anchorFromLensItem(item);
+    const key = anchorKey(anchor);
+    const hasTrace = ['entryPath', 'serviceRoots', 'dataObjects', 'externalDependencies'].some((field) => anchor[field].length > 0);
+    if (!hasTrace) {
+      if (anchor.operations.length > 0) unassignedAnchors.push({ operations: anchor.operations, sourceLens: [lens], reason: 'no-traceable-anchor' });
+      continue;
+    }
+    const existing = anchorsByKey.get(key) ?? { entryPath: [], serviceRoots: [], dataObjects: [], externalDependencies: [], operations: [], sourceLens: [] };
+    anchorsByKey.set(key, mergeAnchor(existing, anchor, lens));
+  }
+  return {
+    code: 0,
+    output: {
+      contextId,
+      anchors: [...anchorsByKey.values()],
+      unassignedAnchors,
+    },
+  };
+}
+
+function capabilityFromAnchor(contextId, anchor, index) {
+  const primary = normalizeList(anchor.operations)[0] ?? normalizeList(anchor.entryPath)[0] ?? normalizeList(anchor.serviceRoots)[0] ?? `${contextId}-capability-${index + 1}`;
+  const idSource = [
+    ...normalizeList(anchor.entryPath),
+    ...normalizeList(anchor.serviceRoots),
+    ...normalizeList(anchor.dataObjects),
+    ...normalizeList(anchor.externalDependencies),
+  ][0] ?? `${contextId}-capability-${index + 1}`;
+  const capabilityId = normalizeDuplicateToken(idSource.replace(/[#.].*$/, '')) || `${contextId}-capability-${index + 1}`;
+  return {
+    capabilityId,
+    name: primary,
+    summary: `Handle ${primary}.`,
+    entryPaths: normalizeList(anchor.entryPath),
+    serviceRoots: normalizeList(anchor.serviceRoots),
+    dataObjects: normalizeList(anchor.dataObjects),
+    externalDependencies: normalizeList(anchor.externalDependencies),
+    operations: normalizeList(anchor.operations),
+    confidence: anchor.confidence ?? 'draft',
+  };
+}
+
+function qualityIssue(code, contextId, capabilityId, message, extra = {}) {
+  return {
+    code,
+    severity: 'quality',
+    context: contextId,
+    capability: capabilityId,
+    blocksWrite: false,
+    blocksVerified: true,
+    message,
+    ...extra,
+  };
+}
+
+function plannedCapabilityQualityIssues(contextId, capability, allCapabilities, traceLimitations = []) {
+  const issues = [];
+  if (allCapabilities.length === 1 && !capability.splitConfirmationReason && !capability.noSplitReason) {
+    issues.push(qualityIssue('possible-under-split', contextId, capability.capabilityId, 'Single capability plan needs manual review for possible under-splitting.'));
+  }
+  if (normalizeList(capability.entryPaths).length === 0) issues.push(qualityIssue('missing-entry-path', contextId, capability.capabilityId, 'No entry path anchor was found.'));
+  if (normalizeList(capability.serviceRoots).length === 0) issues.push(qualityIssue('missing-service-root', contextId, capability.capabilityId, 'No service root anchor was found.'));
+  if (normalizeList(capability.dataObjects).length === 0 && normalizeList(capability.externalDependencies).length === 0) {
+    issues.push(qualityIssue('missing-data-and-external', contextId, capability.capabilityId, 'No data object or external dependency anchor was found.'));
+  }
+  for (const limitation of traceLimitations.filter((item) => item.manualDecision !== 'allow')) {
+    const code = limitation.manualDecision === 'reject' ? 'trace-rejected' : 'trace-pending';
+    issues.push(qualityIssue(code, contextId, capability.capabilityId, `Trace limitation ${limitation.anchor} is ${limitation.manualDecision}.`, { traceLimitation: limitation }));
+  }
+  return issues;
+}
+
+function normalizeCapabilityPlan(payload) {
+  return payload.capabilityPlan ?? payload.planOutput ?? payload.plan;
+}
+
+function validatePromotePlan(payload, contextId, capabilities) {
+  const plan = normalizeCapabilityPlan(payload);
+  if (!plan || typeof plan !== 'object') {
+    return [inputIssue('capabilityPlan is required before promote-candidate writes documents.', { field: 'capabilityPlan' })];
+  }
+  if (plan.contextId && plan.contextId !== contextId) {
+    return [inputIssue('capabilityPlan.contextId must match contextId.', { field: 'capabilityPlan.contextId' })];
+  }
+  const candidates = normalizeObjectList(plan.capabilityCandidates);
+  if (candidates.length === 0) {
+    return [inputIssue('capabilityPlan.capabilityCandidates must include at least one planned capability.', { field: 'capabilityPlan.capabilityCandidates' })];
+  }
+  const plannedById = new Map(candidates.map((candidate) => [candidate.capabilityId, candidate]));
+  return capabilities.flatMap((capability, index) => {
+    const prefix = `capabilities[${index}]`;
+    const planned = plannedById.get(capability.capabilityId);
+    if (!planned) {
+      return [inputIssue(`${prefix}.capabilityId is not present in capabilityPlan.`, { field: `${prefix}.capabilityId` })];
+    }
+    if (!hasAnyTraceableAnchor(planned)) {
+      return [inputIssue(`${prefix} planned capability must include at least one traceable anchor.`, { field: prefix })];
+    }
+    return [];
+  });
+}
+
+export function planCapabilities(input = {}) {
+  const payload = input.payload ?? input;
+  const contextId = payload.contextId ?? '';
+  const anchors = normalizeObjectList(payload.anchors);
+  const unassignedAnchors = normalizeObjectList(payload.unassignedAnchors);
+  const capabilityCandidates = normalizeObjectList(payload.capabilityCandidates).length > 0
+    ? normalizeObjectList(payload.capabilityCandidates)
+    : anchors.map((anchor, index) => capabilityFromAnchor(contextId, anchor, index));
+  const issues = [
+    assertValidId(contextId, 'contextId'),
+    capabilityCandidates.length === 0 ? inputIssue('capabilityCandidates must include at least one capability candidate.', { field: 'capabilityCandidates' }) : null,
+  ].filter(Boolean);
+  const traceIssues = [];
+  const traceLimitations = normalizeObjectList(payload.traceLimitations).map((item, index) => normalizeTraceLimitation(item, index, traceIssues));
+  issues.push(...traceIssues);
+  capabilityCandidates.forEach((capability, index) => {
+    const prefix = `capabilityCandidates[${index}]`;
+    issues.push(assertValidId(capability.capabilityId, `${prefix}.capabilityId`));
+    if (!capability.name) issues.push(inputIssue(`${prefix}.name is required.`, { field: `${prefix}.name` }));
+    if (!capability.summary && normalizeList(capability.operations).length === 0) {
+      issues.push(inputIssue(`${prefix}.summary or ${prefix}.operations is required.`, { field: prefix }));
+    }
+    if (!hasAnyTraceableAnchor(capability)) issues.push(inputIssue(`${prefix} must include at least one traceable anchor.`, { field: prefix }));
+  });
+  if (unassignedAnchors.length > 0 && !payload.unassignedAnchorDecision) {
+    issues.push(inputIssue('unassignedAnchors require unassignedAnchorDecision before writing documents.', { field: 'unassignedAnchorDecision' }));
+  }
+  if (issues.filter(Boolean).length > 0) {
+    return { code: 1, output: { issues: issues.filter(Boolean), capabilityCandidates, traceLimitations } };
+  }
+  const qualityIssues = capabilityCandidates.flatMap((capability) => plannedCapabilityQualityIssues(contextId, capability, capabilityCandidates, traceLimitations));
+  if (unassignedAnchors.length > 0) {
+    qualityIssues.push(qualityIssue('unassigned-anchors-present', contextId, '', 'Unassigned anchors remain after planning.', { unassignedAnchors, decision: payload.unassignedAnchorDecision }));
+  }
+  const statusDecisions = capabilityCandidates.map((capability) => ({
+    type: 'capability',
+    id: capability.capabilityId,
+    status: qualityIssues.some((issue) => issue.capability === capability.capabilityId && ['trace-rejected', 'trace-pending'].includes(issue.code)) ? 'needs-review' : 'draft',
+    reasonCodes: qualityIssues.filter((issue) => issue.capability === capability.capabilityId).map((issue) => issue.code),
+  }));
+  return {
+    code: 0,
+    output: {
+      contextId,
+      capabilityCandidates,
+      traceLimitations,
+      qualityIssues,
+      statusDecisions,
+    },
+  };
 }
 
 function formatReadmeUpstreamDownstream(capabilities) {
@@ -1103,6 +1391,180 @@ function formatReadmeUpstreamDownstream(capabilities) {
   return sections
     .map(([heading, lines]) => `${heading}\n${lines.join('\n')}`)
     .join('\n\n');
+}
+
+function formatCapabilityFlow(capability, fallbackBody) {
+  const callFlow = collectEvidenceKindSection(capability, 'call-flow', 'callRelations') || asText(capability.callFlow);
+  if (callFlow) return callFlow;
+  if (fallbackBody) return fallbackBody;
+  return '待补充 call-flow evidence；当前不得用 summary 或定位语替代典型流程。';
+}
+
+function formatCapabilityUpstreamDownstream(capability) {
+  if (capability.upstreamDownstream) return capability.upstreamDownstream;
+  const callFlow = collectEvidenceKindSection(capability, 'call-flow', 'callRelations');
+  if (callFlow) return callFlow;
+  const routes = collectEvidenceSection(capability, 'routes');
+  if (routes) return `仅入口路由，缺调用因果：\n${routes}`;
+  return '';
+}
+
+function formatCapabilityVerification(capability) {
+  return asText(capability.verificationMethod);
+}
+
+function currentRepoCommit(repoRoot) {
+  try {
+    return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch {
+    return null;
+  }
+}
+
+function evidenceRepoCommitValue(evidence, repoCommit) {
+  return evidence.repo_commit ?? evidence.repoCommit ?? repoCommit ?? 'unknown';
+}
+
+function repoCommitGateIssues(capabilities, repoCommit, knowledgeRoot, contextId) {
+  if (!repoCommit) return [];
+  return capabilities.flatMap((capability, capabilityIndex) => (capability.evidence ?? []).flatMap((evidence, evidenceIndex) => {
+    const value = evidenceRepoCommitValue(evidence, repoCommit);
+    if (value && value !== 'unknown') return [];
+    return [inputIssue(`capabilities[${capabilityIndex}].evidence[${evidenceIndex}].repo_commit cannot be unknown when git HEAD is available.`, {
+      field: `capabilities[${capabilityIndex}].evidence[${evidenceIndex}].repo_commit`,
+      path: contextPath(knowledgeRoot, contextId, 'evidence', `${capability.capabilityId}-${evidence.evidenceKind}.md`),
+    })];
+  }));
+}
+
+function unknownRepoCommitEvidence(capabilities, repoCommit, knowledgeRoot, contextId) {
+  if (repoCommit) return [];
+  return capabilities.flatMap((capability) => (capability.evidence ?? []).map((evidence) => ({
+    path: contextPath(knowledgeRoot, contextId, 'evidence', `${capability.capabilityId}-${evidence.evidenceKind}.md`),
+    capability: capability.capabilityId,
+    evidenceKind: evidence.evidenceKind,
+    reason: 'git-head-unavailable',
+  })));
+}
+
+function evidenceDepthForCapability(capability) {
+  const kinds = new Set((capability.evidence ?? []).map((evidence) => evidence.evidenceKind));
+  return {
+    routes: kinds.has('routes'),
+    callFlow: kinds.has('call-flow'),
+    data: kinds.has('data'),
+    external: kinds.has('external'),
+  };
+}
+
+function promoteQualityForCapability(contextId, capability, capabilities, guidanceIssues = []) {
+  const depth = evidenceDepthForCapability(capability);
+  const issues = [];
+  if (capabilities.length === 1 && !capability.splitConfirmationReason && !capability.noSplitReason) {
+    issues.push(qualityIssue('possible-under-split', contextId, capability.capabilityId, 'Single capability promotion needs manual review for possible under-splitting.'));
+  }
+  if (uniqueLines([capability.entryPaths, collectEvidenceSection(capability, 'entryPaths')]).length === 0) {
+    issues.push(qualityIssue('missing-entry-path', contextId, capability.capabilityId, 'No entry path was provided.'));
+  }
+  if (!depth.callFlow) issues.push(qualityIssue('missing-call-flow', contextId, capability.capabilityId, 'No call-flow evidence was generated.', { evidenceKind: 'call-flow' }));
+  if (!depth.data) issues.push(qualityIssue('missing-data', contextId, capability.capabilityId, 'No data evidence was generated.', { evidenceKind: 'data' }));
+  if (!depth.external) issues.push(qualityIssue('missing-external', contextId, capability.capabilityId, 'No external evidence was generated.', { evidenceKind: 'external' }));
+  if (depth.routes && !depth.callFlow && !depth.data && !depth.external) {
+    issues.push(qualityIssue('routes-only', contextId, capability.capabilityId, 'Only routes evidence is present.'));
+  }
+  if (guidanceIssues.some((issue) => issue.capability === capability.capabilityId)) {
+    issues.push(qualityIssue('guidance-anchor-not-found', contextId, capability.capabilityId, 'Some structured guidance anchors were rejected.'));
+  }
+  return issues;
+}
+
+function statusFromQuality(capabilityId, qualityIssues) {
+  const reasonCodes = qualityIssues.filter((issue) => issue.capability === capabilityId).map((issue) => issue.code);
+  return {
+    type: 'capability',
+    id: capabilityId,
+    status: reasonCodes.includes('trace-rejected') || reasonCodes.includes('guidance-empty') ? 'needs-review' : 'draft',
+    reasonCodes,
+  };
+}
+
+function evidenceStatusDecisions(capability, qualityIssues) {
+  return (capability.evidence ?? []).map((evidence) => {
+    const evidenceKindCode = evidence.evidenceKind === 'call-flow' ? 'missing-call-flow' : `missing-${evidence.evidenceKind}`;
+    const blockedByCapability = qualityIssues
+      .filter((issue) => issue.capability === capability.capabilityId && issue.blocksVerified)
+      .map((issue) => issue.code)
+      .filter((code) => code !== evidenceKindCode);
+    return {
+      type: 'evidence',
+      id: `${capability.capabilityId}-${evidence.evidenceKind}`,
+      status: 'draft',
+      reasonCodes: blockedByCapability,
+    };
+  });
+}
+
+const GUIDANCE_ANCHOR_TYPES = new Set(['symbol', 'route', 'table', 'cache', 'topic', 'external']);
+
+function evidenceAnchorSet(capability) {
+  const anchors = new Set();
+  for (const evidence of capability.evidence ?? []) {
+    for (const field of ['entryPaths', 'routes', 'callRelations', 'dataMessages', 'frontendEntries', 'externalDependencies', 'dependencyAnchors']) {
+      for (const line of uniqueLines([evidence[field]])) {
+        anchors.add(line.replace(/^[-*]\s+/, '').trim());
+        for (const token of line.match(/[A-Z][$A-Za-z0-9_]*(?:#[A-Za-z_$][$A-Za-z0-9_]*)?/g) ?? []) anchors.add(token);
+        for (const route of line.match(/[A-Z]+ \/[^,\s]+/g) ?? []) anchors.add(route);
+      }
+    }
+  }
+  return anchors;
+}
+
+function validateStructuredGuidance(capability) {
+  const schemas = {
+    structuredMisjudgments: ['misjudgment', 'correctJudgment', 'reason', 'anchors'],
+    structuredReuseGuidance: ['instruction', 'reason', 'anchors'],
+    structuredDoNotReuseGuidance: ['instruction', 'reason', 'anchors'],
+    structuredConfirmationRequired: ['condition', 'reason', 'anchors', 'decisionNeeded'],
+  };
+  const accepted = {};
+  const rendered = {};
+  const issues = [];
+  const anchors = evidenceAnchorSet(capability);
+  for (const [field, required] of Object.entries(schemas)) {
+    accepted[field] = 0;
+    rendered[field] = [];
+    for (const [index, item] of normalizeObjectList(capability[field]).entries()) {
+      const missing = required.filter((key) => key === 'anchors' ? normalizeObjectList(item.anchors).length === 0 : !String(item[key] ?? '').trim());
+      if (missing.length > 0) {
+        issues.push({ code: 'guidance-empty', capability: capability.capabilityId, field: `${field}[${index}]`, message: `Missing required fields: ${missing.join(', ')}.` });
+        continue;
+      }
+      const invalidAnchor = normalizeObjectList(item.anchors).find((anchor) => !GUIDANCE_ANCHOR_TYPES.has(anchor.type) || !anchors.has(String(anchor.value ?? '').trim()));
+      if (invalidAnchor) {
+        issues.push({ code: 'guidance-anchor-not-found', capability: capability.capabilityId, field: `${field}[${index}].anchors`, message: `Anchor ${invalidAnchor.value ?? ''} is not present in this context evidence.` });
+        continue;
+      }
+      accepted[field] += 1;
+      rendered[field].push(item);
+    }
+  }
+  return { accepted, rendered, issues };
+}
+
+function renderStructuredGuidance(payload, validation) {
+  const reuse = validation.rendered.structuredReuseGuidance.map((item) => `- ${item.instruction}\n  原因：${item.reason}${item.appliesWhen ? `\n  适用：${item.appliesWhen}` : ''}`).join('\n');
+  const doNotReuse = validation.rendered.structuredDoNotReuseGuidance.map((item) => `- ${item.instruction}\n  原因：${item.reason}${item.appliesWhen ? `\n  适用：${item.appliesWhen}` : ''}`).join('\n');
+  const confirm = validation.rendered.structuredConfirmationRequired.map((item) => `- 条件：${item.condition}\n  需要确认：${item.decisionNeeded}\n  原因：${item.reason}${item.appliesWhen ? `\n  适用：${item.appliesWhen}` : ''}`).join('\n');
+  return {
+    ...payload,
+    reuseGuidance: reuse || payload.reuseGuidance,
+    doNotReuseGuidance: doNotReuse || payload.doNotReuseGuidance,
+    confirmationRequired: confirm || payload.confirmationRequired,
+    commonMisjudgments: validation.rendered.structuredMisjudgments.length > 0
+      ? validation.rendered.structuredMisjudgments.map((item) => `- 误判：${item.misjudgment}\n  正确判断：${item.correctJudgment}\n  原因：${item.reason}${item.verification ? `\n  验证：${item.verification}` : ''}`).join('\n')
+      : payload.commonMisjudgments,
+  };
 }
 
 function todayDate() {
@@ -1576,6 +2038,7 @@ export function promoteCandidate(input) {
   const candidateId = payload.candidateId;
   const contextId = payload.contextId ?? candidateId;
   const capabilities = payload.capabilities ?? [];
+  const repoCommit = currentRepoCommit(repoRoot);
   const issues = [
     assertValidId(candidateId, 'candidateId'),
     assertValidId(contextId, 'contextId'),
@@ -1585,6 +2048,8 @@ export function promoteCandidate(input) {
     !payload.nonResponsibilities ? inputIssue('nonResponsibilities is required.', { field: 'nonResponsibilities' }) : null,
     assertRealBody(payload.body, 'body'),
     ...validatePromoteKnowledgePayload(capabilities),
+    ...validatePromotePlan(payload, contextId, capabilities),
+    ...repoCommitGateIssues(capabilities, repoCommit, knowledgeRoot, contextId),
   ].filter(Boolean);
   if (issues.length) return { code: 2, output: { issues } };
   const candidatePath = join(knowledgeAbs, 'candidates', `${candidateId}.md`);
@@ -1607,6 +2072,16 @@ export function promoteCandidate(input) {
   const coreBusinessLanguage = capabilities
     .map((capability) => `- ${capability.name}: ${capability.summary}`)
     .join('\n');
+  const unknownRepoCommitEvidenceList = unknownRepoCommitEvidence(capabilities, repoCommit, knowledgeRoot, contextId);
+  const guidanceValidations = new Map(capabilities.map((capability) => [capability.capabilityId, validateStructuredGuidance(capability)]));
+  const guidanceIssues = [...guidanceValidations.values()].flatMap((validation) => validation.issues);
+  const guidanceAccepted = Object.fromEntries([...guidanceValidations.entries()].map(([capabilityId, validation]) => [capabilityId, validation.accepted]));
+  const qualityIssues = capabilities.flatMap((capability) => promoteQualityForCapability(contextId, capability, capabilities, guidanceIssues));
+  const evidenceDepth = Object.fromEntries(capabilities.map((capability) => [capability.capabilityId, evidenceDepthForCapability(capability)]));
+  const statusDecisions = capabilities.flatMap((capability) => [
+    statusFromQuality(capability.capabilityId, qualityIssues),
+    ...evidenceStatusDecisions(capability, qualityIssues),
+  ]);
   const targetIssueResult = assertTargetsDoNotExist([
     { abs: changePath, path: changeRelPath },
     { abs: join(knowledgeAbs, 'contexts', contextId, 'CONTEXT.md'), path: contextDocPath },
@@ -1651,33 +2126,35 @@ export function promoteCandidate(input) {
   const createdCapabilityPaths = [];
   const createdEvidencePaths = [];
   for (const capability of capabilities) {
+    const guidanceValidation = guidanceValidations.get(capability.capabilityId);
+    const capabilityPayload = renderStructuredGuidance(capability, guidanceValidation);
+    const acceptedGuidanceCount = Object.values(guidanceValidation.accepted).reduce((sum, count) => sum + count, 0);
+    const shouldStampGuidance = acceptedGuidanceCount > 0;
     const capabilityResult = createCapability({
       ...input,
       payload: {
         contextId,
-        capabilityId: capability.capabilityId,
-        name: capability.name,
-        summary: capability.summary,
-        responsibilities: capability.responsibilities,
-        nonResponsibilities: capability.nonResponsibilities,
-        body: capability.body,
-        businessObjects: capability.businessObjects ?? collectEvidenceSection(capability, 'dataMessages'),
-        upstreamDownstream: capability.upstreamDownstream || collectEvidenceSection(capability, 'callRelations') || collectEvidenceSection(capability, 'routes'),
-        designIntent: capability.designIntent,
-        codeFactEntries: capability.codeFactEntries ?? collectEvidenceSection(capability, 'entryPaths'),
-        agentDevelopmentGuidance: capability.agentDevelopmentGuidance,
-        reuseGuidance: capability.reuseGuidance,
-        doNotReuseGuidance: capability.doNotReuseGuidance,
-        confirmationRequired: capability.confirmationRequired,
-        developmentTaskBreakdown: capability.developmentTaskBreakdown,
-        commonMisjudgments: capability.commonMisjudgments,
-        developmentVerification: capability.developmentVerification,
-        verificationMethod: capability.verificationMethod ?? (capability.evidence ?? [])
-          .map((evidence) => `- ${evidence.evidenceKind}: ${evidence.generationMethod ?? evidence.generation_evidence}`)
-          .join('\n'),
+        capabilityId: capabilityPayload.capabilityId,
+        name: capabilityPayload.name,
+        summary: capabilityPayload.summary,
+        responsibilities: capabilityPayload.responsibilities,
+        nonResponsibilities: capabilityPayload.nonResponsibilities,
+        body: formatCapabilityFlow(capabilityPayload),
+        businessObjects: capabilityPayload.businessObjects ?? collectEvidenceSection(capabilityPayload, 'dataMessages'),
+        upstreamDownstream: formatCapabilityUpstreamDownstream(capabilityPayload),
+        designIntent: capabilityPayload.designIntent,
+        codeFactEntries: capabilityPayload.codeFactEntries ?? collectEvidenceSection(capabilityPayload, 'entryPaths'),
+        agentDevelopmentGuidance: capabilityPayload.agentDevelopmentGuidance,
+        reuseGuidance: capabilityPayload.reuseGuidance,
+        doNotReuseGuidance: capabilityPayload.doNotReuseGuidance,
+        confirmationRequired: capabilityPayload.confirmationRequired,
+        developmentTaskBreakdown: capabilityPayload.developmentTaskBreakdown,
+        commonMisjudgments: capabilityPayload.commonMisjudgments,
+        developmentVerification: capabilityPayload.developmentVerification,
+        verificationMethod: formatCapabilityVerification(capability),
         openQuestions: capability.openQuestions ?? collectEvidenceSection(capability, 'limitations'),
         evidencePaths: capabilityEvidencePaths(knowledgeRoot, contextId, capability),
-        guidanceReviewedAt: capability.guidanceReviewedAt ?? capability.guidance_reviewed_at ?? generatedAt.slice(0, 10),
+        guidanceReviewedAt: capability.guidanceReviewedAt ?? capability.guidance_reviewed_at ?? (shouldStampGuidance ? generatedAt.slice(0, 10) : ''),
         guidanceReviewInterval: capability.guidanceReviewInterval ?? capability.guidance_review_interval,
       },
     });
@@ -1691,6 +2168,7 @@ export function promoteCandidate(input) {
         ...input,
         payload: {
           ...evidence,
+          repo_commit: evidenceRepoCommitValue(evidence, repoCommit),
           contextId,
           capabilityId: capability.capabilityId,
         },
@@ -1728,6 +2206,13 @@ export function promoteCandidate(input) {
       evidencePaths: createdEvidencePaths,
       changePath: changeRelPath,
       docsCount: createdCapabilityPaths.length + createdEvidencePaths.length,
+      qualityIssues,
+      statusDecisions,
+      evidenceDepth,
+      guidanceIssues,
+      guidanceAccepted,
+      repoCommit: repoCommit ?? 'unknown',
+      unknownRepoCommitEvidence: unknownRepoCommitEvidenceList,
     },
   };
 }
@@ -1816,13 +2301,7 @@ export function createEvidence(input) {
   const issues = [
     assertValidId(payload.contextId, 'contextId'),
     assertValidId(payload.capabilityId, 'capabilityId'),
-    !EVIDENCE_KINDS.includes(payload.evidenceKind) ? inputIssue('evidenceKind is not supported.', { field: 'evidenceKind' }) : null,
-    !payload.name ? inputIssue('name is required.', { field: 'name' }) : null,
-    !payload.summary ? inputIssue('summary is required.', { field: 'summary' }) : null,
-    !payload.source ? inputIssue('source is required.', { field: 'source' }) : null,
-    !payload.generator ? inputIssue('generator is required.', { field: 'generator' }) : null,
-    !payload.generation_evidence ? inputIssue('generation_evidence is required.', { field: 'generation_evidence' }) : null,
-    assertRealBody(payload.body, 'body'),
+    ...validateEvidencePayload(payload),
   ].filter(Boolean);
   if (issues.length) return { code: 2, output: { issues } };
   const capabilityPath = join(knowledgeAbs, 'contexts', payload.contextId, 'capabilities', `${payload.capabilityId}.md`);
@@ -1853,6 +2332,16 @@ export function createEvidence(input) {
   markdown = injectEvidenceSection(markdown, payload.evidenceKind, '调用关系', payload.callRelations);
   markdown = injectEvidenceSection(markdown, payload.evidenceKind, '数据 / 消息', payload.dataMessages);
   markdown = injectEvidenceSection(markdown, payload.evidenceKind, '前端入口', payload.frontendEntries);
+  markdown = injectOptionalAfterHeading(markdown, '边界外依赖', sectionText(
+    payload.externalDependencies ?? payload.dependencyAnchors,
+    payload.evidenceKind === 'external' ? 'external evidence 缺少依赖锚点；补证前不得标为 verified。' : '',
+  ));
+  markdown = injectOptionalAfterHeading(markdown, '调用方', sectionText(payload.callers, payload.evidenceKind === 'external' ? 'external evidence 缺少调用方；补证前不得标为 verified。' : ''));
+  markdown = injectOptionalAfterHeading(markdown, '下游接口', sectionText(payload.downstreamInterfaces, payload.evidenceKind === 'external' ? 'external evidence 缺少下游接口；补证前不得标为 verified。' : ''));
+  markdown = injectOptionalAfterHeading(markdown, '依赖类型', sectionText(payload.dependencyType, payload.evidenceKind === 'external' ? 'external evidence 缺少依赖类型；补证前不得标为 verified。' : ''));
+  markdown = injectOptionalAfterHeading(markdown, '触发条件', sectionText(payload.triggerConditions, payload.evidenceKind === 'external' ? 'external evidence 缺少触发条件；补证前不得标为 verified。' : ''));
+  markdown = injectOptionalAfterHeading(markdown, '失败 / 超时处理', sectionText(payload.failureHandling, payload.evidenceKind === 'external' ? 'external evidence 缺少失败/超时处理；补证前不得标为 verified。' : ''));
+  markdown = injectOptionalAfterHeading(markdown, '边界说明', sectionText(payload.boundaryNotes, payload.evidenceKind === 'external' ? 'external evidence 缺少边界说明；补证前不得标为 verified。' : ''));
   markdown = injectAfterHeading(markdown, '生成证据', payload.generation_evidence);
   markdown = injectAfterHeading(
     markdown,

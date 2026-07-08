@@ -18,12 +18,38 @@ function tempRepo() {
   return repoRoot;
 }
 
+function initGitHead(repoRoot) {
+  spawnSync('git', ['init'], { cwd: repoRoot, encoding: 'utf8' });
+  spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: repoRoot, encoding: 'utf8' });
+  spawnSync('git', ['config', 'user.name', 'Test User'], { cwd: repoRoot, encoding: 'utf8' });
+  writeFileSync(join(repoRoot, 'README.md'), '# Test repo\n');
+  spawnSync('git', ['add', 'README.md'], { cwd: repoRoot, encoding: 'utf8' });
+  spawnSync('git', ['commit', '-m', 'init'], { cwd: repoRoot, encoding: 'utf8' });
+}
+
 function runScript(repoRoot, name, payload) {
   return spawnSync(process.execPath, [join(root, `skills/yog/scripts/${name}.mjs`)], {
     cwd: repoRoot,
     input: JSON.stringify({ repoRoot, payload }),
     encoding: 'utf8',
   });
+}
+
+function capabilityPlan(contextId, capabilities) {
+  return {
+    contextId,
+    capabilityCandidates: capabilities.map((capability) => ({
+      capabilityId: capability.capabilityId,
+      name: capability.name,
+      summary: capability.summary,
+      entryPaths: capability.entryPaths ?? [`${capability.name.replace(/\s+/g, '')}Controller#entry`],
+      serviceRoots: capability.serviceRoots ?? [],
+      dataObjects: capability.dataObjects ?? [],
+      externalDependencies: capability.externalDependencies ?? [],
+      operations: capability.operations ?? [capability.name],
+      confidence: 'draft',
+    })),
+  };
 }
 
 test('create-candidate rejects missing real body before writing', () => {
@@ -165,6 +191,12 @@ test('create-capability and evidence write development guidance and metadata', (
   assert.match(capabilityText, /## Agent 开发指引\n\n### 优先复用\n\n- Reuse RefundController and RefundService\./);
   assert.match(capabilityText, /### 不要复用\n\n- Do not bypass refund status checks\./);
   assert.match(capabilityText, /### 停下来确认\n\n- Confirm payment gateway callback semantics\./);
+  const agentGuidance = capabilityText.match(/## Agent 开发指引\n\n(?<body>[\s\S]*?)\n\n## 常见误判/).groups.body;
+  assert.equal(agentGuidance.match(/### 优先复用/g).length, 1);
+  assert.equal(agentGuidance.match(/### 不要复用/g).length, 1);
+  assert.equal(agentGuidance.match(/### 停下来确认/g).length, 1);
+  assert.equal(agentGuidance.match(/### 开发任务拆分/g).length, 1);
+  assert.equal(agentGuidance.match(/### 验证方式/g).length, 1);
   assert.match(capabilityText, /## 常见误判\n\n- Misjudgment: direct DB update is enough\./);
   assert.equal(runScript(repoRoot, 'create-evidence', {
     contextId: 'order',
@@ -354,6 +386,34 @@ test('promote-candidate creates context records change and removes candidate', (
     body: 'Refund appears repeatedly in support requests and after-sales process reviews.',
   });
   assert.equal(candidate.status, 0);
+  const capabilities = [
+    {
+      capabilityId: 'refund-request',
+      name: 'Refund Request',
+      summary: 'Handle refund request intake and handoff.',
+      responsibilities: 'Own refund request business flow and status vocabulary.',
+      nonResponsibilities: 'Payment gateway settlement internals.',
+      body: 'Refund request starts from customer after-sales intent, records the request, and hands off to fulfillment review.',
+      entryPaths: ['RefundController#create'],
+      evidence: [
+        {
+          evidenceKind: 'routes',
+          name: 'Refund request routes',
+          summary: 'HTTP routes that enter refund request handling.',
+          source: 'repository',
+          generator: 'subagent-codegraph',
+          generation_evidence: 'CodeGraph inspected refund route and service entry points.',
+          body: 'Refund request route evidence links the HTTP entry to the refund request service.',
+          generationMethod: 'Parallel agent scan using CodeGraph call evidence.',
+          entryPaths: '- src/refund/controller.js',
+          routes: '- POST /refunds',
+          callRelations: '- RefundController -> RefundRequestService',
+          dataMessages: '- refund_requests table',
+          limitations: '- Unit test fixture uses representative paths.',
+        },
+      ],
+    },
+  ];
   const result = runScript(repoRoot, 'promote-candidate', {
     candidateId: 'refund',
     contextId: 'refund',
@@ -363,33 +423,8 @@ test('promote-candidate creates context records change and removes candidate', (
     responsibilities: 'Own refund business language.',
     nonResponsibilities: 'Payment gateway settlement.',
     body: 'Refund context covers refund request terminology, after-sales handoff, and status vocabulary.',
-    capabilities: [
-      {
-        capabilityId: 'refund-request',
-        name: 'Refund Request',
-        summary: 'Handle refund request intake and handoff.',
-        responsibilities: 'Own refund request business flow and status vocabulary.',
-        nonResponsibilities: 'Payment gateway settlement internals.',
-        body: 'Refund request starts from customer after-sales intent, records the request, and hands off to fulfillment review.',
-        evidence: [
-          {
-            evidenceKind: 'routes',
-            name: 'Refund request routes',
-            summary: 'HTTP routes that enter refund request handling.',
-            source: 'repository',
-            generator: 'subagent-codegraph',
-            generation_evidence: 'CodeGraph inspected refund route and service entry points.',
-            body: 'Refund request route evidence links the HTTP entry to the refund request service.',
-            generationMethod: 'Parallel agent scan using CodeGraph call evidence.',
-            entryPaths: '- src/refund/controller.js',
-            routes: '- POST /refunds',
-            callRelations: '- RefundController -> RefundRequestService',
-            dataMessages: '- refund_requests table',
-            limitations: '- Unit test fixture uses representative paths.',
-          },
-        ],
-      },
-    ],
+    capabilityPlan: capabilityPlan('refund', capabilities),
+    capabilities,
   });
   assert.equal(result.status, 0);
   const output = JSON.parse(result.stdout);
@@ -399,6 +434,17 @@ test('promote-candidate creates context records change and removes candidate', (
   assert.deepEqual(output.capabilityPaths, ['docs/knowledge/contexts/refund/capabilities/refund-request.md']);
   assert.deepEqual(output.evidencePaths, ['docs/knowledge/contexts/refund/evidence/refund-request-routes.md']);
   assert.equal(output.docsCount, 2);
+  assert.equal(output.qualityIssues.some((issue) => issue.code === 'routes-only'), true);
+  assert.deepEqual(output.evidenceDepth['refund-request'], { routes: true, callFlow: false, data: false, external: false });
+  assert.equal(output.statusDecisions.some((decision) => decision.id === 'refund-request' && decision.status === 'draft'), true);
+  assert.deepEqual(output.unknownRepoCommitEvidence, [
+    {
+      path: 'docs/knowledge/contexts/refund/evidence/refund-request-routes.md',
+      capability: 'refund-request',
+      evidenceKind: 'routes',
+      reason: 'git-head-unavailable',
+    },
+  ]);
   assert.equal(output.changePath, 'docs/knowledge/changes/20260630-promote-candidate-refund.md');
   assert.equal(existsSync(join(repoRoot, 'docs/knowledge/candidates/refund.md')), false);
   assert.equal(existsSync(join(repoRoot, 'docs/knowledge/contexts/refund/CONTEXT.md')), true);
@@ -412,12 +458,14 @@ test('promote-candidate creates context records change and removes candidate', (
   assert.match(change, /docs\/knowledge\/contexts\/refund\/capabilities\/refund-request\.md/);
   assert.match(change, /docs\/knowledge\/contexts\/refund\/evidence\/refund-request-routes\.md/);
   const capability = readFileSync(join(repoRoot, 'docs/knowledge/contexts/refund/capabilities/refund-request.md'), 'utf8');
-  assert.match(capability, /Refund request starts from customer after-sales intent/);
+  assert.match(capability, /待补充 call-flow evidence/);
+  assert.doesNotMatch(capability, /Refund request starts from customer after-sales intent/);
   assert.match(capability, /evidence: \[docs\/knowledge\/contexts\/refund\/evidence\/refund-request-routes\.md\]/);
   assert.match(capability, /## 关键业务对象\n\n- refund_requests table/);
-  assert.match(capability, /## 上下游关系\n\n- RefundController -> RefundRequestService/);
+  assert.match(capability, /## 上下游关系\n\n仅入口路由，缺调用因果：\n- POST \/refunds/);
   assert.match(capability, /## 代码事实入口\n\n- src\/refund\/controller\.js/);
-  assert.match(capability, /## 验证方式\n\n- routes: Parallel agent scan using CodeGraph call evidence\./);
+  assert.match(capability, /## 验证方式\n\n当前为 draft；升级 verified 前需要补充测试、人工确认或生产证据。/);
+  assert.doesNotMatch(capability, /Parallel agent scan using CodeGraph call evidence/);
   assert.match(capability, /## 未确认问题\n\n- Unit test fixture uses representative paths\./);
   const contextText = readFileSync(join(repoRoot, 'docs/knowledge/contexts/refund/CONTEXT.md'), 'utf8');
   assert.match(contextText, /## 负责什么\n\nOwn refund business language\./);
@@ -440,6 +488,71 @@ test('promote-candidate writes grouped deduplicated context README upstream rela
     summary: 'Course link boundary candidate.',
     body: 'Course link generation appears in route, call-flow, and data evidence.',
   }).status, 0);
+  const capabilities = [
+    {
+      capabilityId: 'course-link-generation',
+      name: 'Course Link Generation',
+      summary: 'Generate course link from route to cache.',
+      responsibilities: 'Own course link generation flow.',
+      nonResponsibilities: 'Course content authoring.',
+      body: 'Course link generation starts from a route, reaches a service, and persists cache data.',
+      entryPaths: ['CourseLinkController#createCourseLink'],
+      dataObjects: ['CourseLinkCacheMapper'],
+      externalDependencies: ['FeishuLinkClient#createLink'],
+      evidence: [
+        {
+          evidenceKind: 'routes',
+          name: 'Course link route',
+          summary: 'Route entry for course link generation.',
+          source: 'repository',
+          generator: 'unit-test',
+          generation_evidence: 'Unit test evidence.',
+          body: 'Route evidence identifies the external entry.',
+          routes: '- CourseLinkController#createCourseLink',
+          callRelations: '- CourseLinkController#createCourseLink -> CourseLinkService#createCourseLink',
+        },
+        {
+          evidenceKind: 'call-flow',
+          name: 'Course link call flow',
+          summary: 'Service call flow for course link generation.',
+          source: 'repository',
+          generator: 'unit-test',
+          generation_evidence: 'Unit test evidence.',
+          body: 'Call-flow evidence tracks service orchestration.',
+          callRelations: '- CourseLinkController#createCourseLink -> CourseLinkService#createCourseLink\n- CourseLinkService#createCourseLink -> CourseLinkCacheMapper#selectAvailable',
+        },
+        {
+          evidenceKind: 'data',
+          name: 'Course link cache data',
+          summary: 'Cache dependency for course link generation.',
+          source: 'repository',
+          generator: 'unit-test',
+          generation_evidence: 'Unit test evidence.',
+          body: 'Data evidence records cache persistence dependency.',
+          callRelations: '- CourseLinkService#createCourseLink -> CourseLinkCacheMapper#selectAvailable',
+          dataMessages: '- course_link_cache.cache_key',
+        },
+        {
+          evidenceKind: 'external',
+          name: 'Course link external dependency',
+          summary: 'External dependency used while generating a course link.',
+          source: 'repository',
+          generator: 'unit-test',
+          generation_evidence: 'Unit test evidence.',
+          body: 'External evidence records downstream dependency used by course link generation.',
+          externalDependencies: '- FeishuLinkClient#createLink',
+          callers: '- CourseLinkService#createCourseLink',
+          downstreamInterfaces: '- FeishuLinkClient#createLink',
+          dependencyType: 'downstream-service',
+          triggerConditions: '- Course link generation requests a Feishu link.',
+          failureHandling: '- Static test fixture records timeout handling as pending.',
+          boundaryNotes: '- Feishu link creation remains a downstream dependency, not this capability main entry.',
+          callRelations: '- CourseLinkService#createCourseLink -> FeishuLinkClient#createLink',
+          limitations: '- Static trace stops at FeishuLinkClient.',
+        },
+      ],
+    },
+  ];
 
   const result = runScript(repoRoot, 'promote-candidate', {
     candidateId: 'course-link',
@@ -450,57 +563,165 @@ test('promote-candidate writes grouped deduplicated context README upstream rela
     responsibilities: 'Own course link generation language.',
     nonResponsibilities: 'Course content authoring.',
     body: 'Course link context covers entry routes, service call flow, and cache dependency vocabulary.',
-    capabilities: [
-      {
-        capabilityId: 'course-link-generation',
-        name: 'Course Link Generation',
-        summary: 'Generate course link from route to cache.',
-        responsibilities: 'Own course link generation flow.',
-        nonResponsibilities: 'Course content authoring.',
-        body: 'Course link generation starts from a route, reaches a service, and persists cache data.',
-        evidence: [
-          {
-            evidenceKind: 'routes',
-            name: 'Course link route',
-            summary: 'Route entry for course link generation.',
-            source: 'repository',
-            generator: 'unit-test',
-            generation_evidence: 'Unit test evidence.',
-            body: 'Route evidence identifies the external entry.',
-            routes: '- CourseLinkController#createCourseLink',
-            callRelations: '- CourseLinkController#createCourseLink -> CourseLinkService#createCourseLink',
-          },
-          {
-            evidenceKind: 'call-flow',
-            name: 'Course link call flow',
-            summary: 'Service call flow for course link generation.',
-            source: 'repository',
-            generator: 'unit-test',
-            generation_evidence: 'Unit test evidence.',
-            body: 'Call-flow evidence tracks service orchestration.',
-            callRelations: '- CourseLinkController#createCourseLink -> CourseLinkService#createCourseLink\n- CourseLinkService#createCourseLink -> CourseLinkCacheMapper#selectAvailable',
-          },
-          {
-            evidenceKind: 'data',
-            name: 'Course link cache data',
-            summary: 'Cache dependency for course link generation.',
-            source: 'repository',
-            generator: 'unit-test',
-            generation_evidence: 'Unit test evidence.',
-            body: 'Data evidence records cache persistence dependency.',
-            callRelations: '- CourseLinkService#createCourseLink -> CourseLinkCacheMapper#selectAvailable',
-            dataMessages: '- course_link_cache.cache_key',
-          },
-        ],
-      },
-    ],
+    capabilityPlan: capabilityPlan('course-link', capabilities),
+    capabilities,
   });
   assert.equal(result.status, 0);
+  const output = JSON.parse(result.stdout);
+  assert.deepEqual(output.evidenceDepth['course-link-generation'], { routes: true, callFlow: true, data: true, external: true });
+  assert.equal(output.qualityIssues.some((issue) => issue.code === 'missing-call-flow'), false);
+  assert.equal(output.evidencePaths.includes('docs/knowledge/contexts/course-link/evidence/course-link-generation-external.md'), true);
 
   const readme = readFileSync(join(repoRoot, 'docs/knowledge/contexts/course-link/README.md'), 'utf8');
   assert.match(readme, /## 上下游关系\n\n入口：\n- CourseLinkController#createCourseLink\n\n主调用链：\n- CourseLinkController#createCourseLink -> CourseLinkService#createCourseLink\n- CourseLinkService#createCourseLink -> CourseLinkCacheMapper#selectAvailable\n\n数据依赖：\n- course_link_cache\.cache_key/);
   assert.equal((readme.match(/CourseLinkController#createCourseLink -> CourseLinkService#createCourseLink/g) ?? []).length, 1);
   assert.equal((readme.match(/CourseLinkService#createCourseLink -> CourseLinkCacheMapper#selectAvailable/g) ?? []).length, 1);
+  const capability = readFileSync(join(repoRoot, 'docs/knowledge/contexts/course-link/capabilities/course-link-generation.md'), 'utf8');
+  assert.match(capability, /## 典型流程\n\n- CourseLinkController#createCourseLink -> CourseLinkService#createCourseLink/);
+  assert.doesNotMatch(capability, /Course link generation starts from a route/);
+  const external = readFileSync(join(repoRoot, 'docs/knowledge/contexts/course-link/evidence/course-link-generation-external.md'), 'utf8');
+  assert.match(external, /evidence_kind: external/);
+  assert.match(external, /## 边界外依赖\n\n- FeishuLinkClient#createLink/);
+  assert.match(external, /## 调用方\n\n- CourseLinkService#createCourseLink/);
+  assert.match(external, /## 下游接口\n\n- FeishuLinkClient#createLink/);
+  assert.match(external, /## 依赖类型\n\ndownstream-service/);
+});
+
+test('promote-candidate validates structured guidance anchors before rendering', () => {
+  const repoRoot = tempRepo();
+  assert.equal(runScript(repoRoot, 'create-candidate', {
+    candidateId: 'reward',
+    name: 'Reward',
+    summary: 'Reward boundary candidate.',
+    body: 'Reward appears in route and service evidence.',
+  }).status, 0);
+  const capabilities = [
+    {
+      capabilityId: 'reward-receive',
+      name: 'Reward Receive',
+      summary: 'Receive a reward with scene checks.',
+      responsibilities: 'Own reward receive checks.',
+      nonResponsibilities: 'Coupon platform internals.',
+      body: 'Reward receive body should not be used as typical flow when call-flow exists.',
+      entryPaths: ['RewardController#receive'],
+      structuredMisjudgments: [
+        {
+          misjudgment: 'Reward can directly call coupon grant.',
+          correctJudgment: 'Reward must enter RewardService#receive first.',
+          reason: 'The service owns scene and duplicate receive checks.',
+          anchors: [{ type: 'symbol', value: 'RewardService#receive' }],
+          verification: 'Cover duplicate receive.',
+        },
+        {
+          misjudgment: 'Missing anchor should be rejected.',
+          correctJudgment: 'This item is not rendered.',
+          reason: 'Anchor is absent from evidence.',
+          anchors: [{ type: 'symbol', value: 'CouponClient#grant' }],
+        },
+      ],
+      structuredReuseGuidance: [
+        {
+          instruction: 'Reuse RewardService#receive for reward receive requests.',
+          reason: 'It owns scene and duplicate checks.',
+          anchors: [{ type: 'symbol', value: 'RewardService#receive' }],
+          appliesWhen: 'Reward receive requirement.',
+        },
+      ],
+      evidence: [
+        {
+          evidenceKind: 'call-flow',
+          name: 'Reward receive call flow',
+          summary: 'Call flow for reward receive.',
+          source: 'repository',
+          generator: 'unit-test',
+          generation_evidence: 'Unit test evidence.',
+          body: 'Call-flow evidence records reward receive orchestration.',
+          callRelations: '- RewardController#receive -> RewardService#receive',
+        },
+      ],
+    },
+  ];
+
+  const result = runScript(repoRoot, 'promote-candidate', {
+    candidateId: 'reward',
+    contextId: 'reward',
+    changeId: '20260708-promote-candidate-reward',
+    name: 'Reward',
+    summary: 'Reward context promoted from evidence.',
+    responsibilities: 'Own reward receive language.',
+    nonResponsibilities: 'Coupon platform internals.',
+    body: 'Reward context covers reward receive checks and downstream grant handoff.',
+    capabilityPlan: capabilityPlan('reward', capabilities),
+    capabilities,
+  });
+  assert.equal(result.status, 0);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.guidanceIssues.some((issue) => issue.code === 'guidance-anchor-not-found'), true);
+  assert.equal(output.guidanceAccepted['reward-receive'].structuredMisjudgments, 1);
+  assert.equal(output.guidanceAccepted['reward-receive'].structuredReuseGuidance, 1);
+
+  const capability = readFileSync(join(repoRoot, 'docs/knowledge/contexts/reward/capabilities/reward-receive.md'), 'utf8');
+  assert.match(capability, /guidance_reviewed_at: \d{4}-\d{2}-\d{2}/);
+  assert.match(capability, /误判：Reward can directly call coupon grant\./);
+  assert.doesNotMatch(capability, /Missing anchor should be rejected/);
+  assert.match(capability, /Reuse RewardService#receive for reward receive requests\./);
+});
+
+test('promote-candidate does not stamp guidance review date for unstructured guidance', () => {
+  const repoRoot = tempRepo();
+  assert.equal(runScript(repoRoot, 'create-candidate', {
+    candidateId: 'reward-text',
+    name: 'Reward Text',
+    summary: 'Reward text boundary candidate.',
+    body: 'Reward text appears in candidate notes and route evidence.',
+  }).status, 0);
+  const capabilities = [
+    {
+      capabilityId: 'reward-text-receive',
+      name: 'Reward Text Receive',
+      summary: 'Receive a reward with text guidance.',
+      responsibilities: 'Own reward receive checks.',
+      nonResponsibilities: 'Coupon platform internals.',
+      body: 'Reward receive body should not become a reviewed guidance stamp.',
+      entryPaths: ['RewardController#receive'],
+      reuseGuidance: '- Reuse RewardService#receive for reward receive requests.',
+      commonMisjudgments: '- Reward can directly call coupon grant.',
+      evidence: [
+        {
+          evidenceKind: 'call-flow',
+          name: 'Reward text receive call flow',
+          summary: 'Call flow for reward receive.',
+          source: 'repository',
+          generator: 'unit-test',
+          generation_evidence: 'Unit test evidence.',
+          body: 'Call-flow evidence records reward receive orchestration.',
+          callRelations: '- RewardController#receive -> RewardService#receive',
+        },
+      ],
+    },
+  ];
+
+  const result = runScript(repoRoot, 'promote-candidate', {
+    candidateId: 'reward-text',
+    contextId: 'reward-text',
+    changeId: '20260708-promote-candidate-reward-text',
+    name: 'Reward Text',
+    summary: 'Reward text context promoted from evidence.',
+    responsibilities: 'Own reward receive language.',
+    nonResponsibilities: 'Coupon platform internals.',
+    body: 'Reward text context covers reward receive checks.',
+    capabilityPlan: capabilityPlan('reward-text', capabilities),
+    capabilities,
+  });
+  assert.equal(result.status, 0);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.guidanceAccepted['reward-text-receive'].structuredMisjudgments, 0);
+  assert.equal(output.guidanceAccepted['reward-text-receive'].structuredReuseGuidance, 0);
+
+  const capability = readFileSync(join(repoRoot, 'docs/knowledge/contexts/reward-text/capabilities/reward-text-receive.md'), 'utf8');
+  assert.match(capability, /guidance_reviewed_at:\s*\n/);
+  assert.match(capability, /Reuse RewardService#receive for reward receive requests\./);
+  assert.match(capability, /Reward can directly call coupon grant\./);
 });
 
 test('promote-candidate requires real capability and evidence payloads', () => {
@@ -511,6 +732,18 @@ test('promote-candidate requires real capability and evidence payloads', () => {
     summary: 'Refund boundary candidate.',
     body: 'Refund appears repeatedly in support requests and after-sales process reviews.',
   });
+  const capabilities = [
+    {
+      capabilityId: 'refund-request',
+      name: 'Refund Request',
+      summary: 'Handle refund request intake and handoff.',
+      responsibilities: 'Own refund request business flow.',
+      nonResponsibilities: 'Payment gateway settlement.',
+      body: 'Refund request starts from customer intent and ends with after-sales handoff.',
+      entryPaths: ['RefundController#create'],
+      evidence: [],
+    },
+  ];
   const result = runScript(repoRoot, 'promote-candidate', {
     candidateId: 'refund',
     contextId: 'refund',
@@ -520,21 +753,105 @@ test('promote-candidate requires real capability and evidence payloads', () => {
     responsibilities: 'Own refund business language.',
     nonResponsibilities: 'Payment gateway settlement.',
     body: 'Refund context covers refund request terminology, after-sales handoff, and status vocabulary.',
-    capabilities: [
-      {
-        capabilityId: 'refund-request',
-        name: 'Refund Request',
-        summary: 'Handle refund request intake and handoff.',
-        responsibilities: 'Own refund request business flow.',
-        nonResponsibilities: 'Payment gateway settlement.',
-        body: 'Refund request starts from customer intent and ends with after-sales handoff.',
-        evidence: [],
-      },
-    ],
+    capabilityPlan: capabilityPlan('refund', capabilities),
+    capabilities,
   });
   assert.equal(result.status, 2);
   assert.match(JSON.parse(result.stdout).issues[0].message, /evidence must include at least one evidence document/);
   assert.equal(existsSync(join(repoRoot, 'docs/knowledge/candidates/refund.md')), true);
+  assert.equal(existsSync(join(repoRoot, 'docs/knowledge/contexts/refund/CONTEXT.md')), false);
+});
+
+test('promote-candidate requires a capability plan before writing documents', () => {
+  const repoRoot = tempRepo();
+  runScript(repoRoot, 'create-candidate', {
+    candidateId: 'refund',
+    name: 'Refund',
+    summary: 'Refund boundary candidate.',
+    body: 'Refund appears repeatedly in support requests.',
+  });
+  const result = runScript(repoRoot, 'promote-candidate', {
+    candidateId: 'refund',
+    contextId: 'refund',
+    changeId: '20260708-promote-candidate-refund-no-plan',
+    name: 'Refund',
+    summary: 'Refund context promoted from repeated candidate signals.',
+    responsibilities: 'Own refund business language.',
+    nonResponsibilities: 'Payment gateway settlement.',
+    body: 'Refund context covers refund request terminology.',
+    capabilities: [
+      {
+        capabilityId: 'refund-request',
+        name: 'Refund Request',
+        summary: 'Handle refund request intake.',
+        responsibilities: 'Own refund request business flow.',
+        nonResponsibilities: 'Payment gateway settlement.',
+        body: 'Refund request starts from customer intent.',
+        evidence: [
+          {
+            evidenceKind: 'routes',
+            name: 'Refund request routes',
+            summary: 'HTTP routes that enter refund request handling.',
+            source: 'repository',
+            generator: 'unit-test',
+            generation_evidence: 'Unit test evidence.',
+            body: 'Route evidence identifies refund request entry.',
+          },
+        ],
+      },
+    ],
+  });
+  assert.equal(result.status, 2);
+  assert.match(JSON.parse(result.stdout).issues.map((issue) => issue.message).join('\n'), /capabilityPlan is required/);
+  assert.equal(existsSync(join(repoRoot, 'docs/knowledge/contexts/refund/CONTEXT.md')), false);
+});
+
+test('promote-candidate rejects unknown repo_commit when git HEAD is available', () => {
+  const repoRoot = tempRepo();
+  initGitHead(repoRoot);
+  runScript(repoRoot, 'create-candidate', {
+    candidateId: 'refund',
+    name: 'Refund',
+    summary: 'Refund boundary candidate.',
+    body: 'Refund appears repeatedly in support requests.',
+  });
+  const capabilities = [
+    {
+      capabilityId: 'refund-request',
+      name: 'Refund Request',
+      summary: 'Handle refund request intake.',
+      responsibilities: 'Own refund request business flow.',
+      nonResponsibilities: 'Payment gateway settlement.',
+      body: 'Refund request starts from customer intent.',
+      entryPaths: ['RefundController#create'],
+      evidence: [
+        {
+          evidenceKind: 'routes',
+          name: 'Refund request routes',
+          summary: 'HTTP routes that enter refund request handling.',
+          source: 'repository',
+          repo_commit: 'unknown',
+          generator: 'unit-test',
+          generation_evidence: 'Unit test evidence.',
+          body: 'Route evidence identifies refund request entry.',
+        },
+      ],
+    },
+  ];
+  const result = runScript(repoRoot, 'promote-candidate', {
+    candidateId: 'refund',
+    contextId: 'refund',
+    changeId: '20260708-promote-candidate-refund-unknown-commit',
+    name: 'Refund',
+    summary: 'Refund context promoted from repeated candidate signals.',
+    responsibilities: 'Own refund business language.',
+    nonResponsibilities: 'Payment gateway settlement.',
+    body: 'Refund context covers refund request terminology.',
+    capabilityPlan: capabilityPlan('refund', capabilities),
+    capabilities,
+  });
+  assert.equal(result.status, 2);
+  assert.match(JSON.parse(result.stdout).issues.map((issue) => issue.message).join('\n'), /repo_commit cannot be unknown/);
   assert.equal(existsSync(join(repoRoot, 'docs/knowledge/contexts/refund/CONTEXT.md')), false);
 });
 
@@ -554,6 +871,28 @@ test('promote-candidate does not remove candidate when target context exists', (
     nonResponsibilities: 'Payment gateway settlement.',
     body: 'Existing refund context content should not be overwritten.',
   });
+  const capabilities = [
+    {
+      capabilityId: 'refund-request',
+      name: 'Refund Request',
+      summary: 'Handle refund request intake and handoff.',
+      responsibilities: 'Own refund request business flow.',
+      nonResponsibilities: 'Payment gateway settlement.',
+      body: 'Refund request starts from customer intent and ends with after-sales handoff.',
+      entryPaths: ['RefundController#create'],
+      evidence: [
+        {
+          evidenceKind: 'routes',
+          name: 'Refund request routes',
+          summary: 'HTTP routes that enter refund request handling.',
+          source: 'repository',
+          generator: 'subagent-codegraph',
+          generation_evidence: 'CodeGraph inspected refund route and service entry points.',
+          body: 'Refund request route evidence links the HTTP entry to the refund request service.',
+        },
+      ],
+    },
+  ];
   const result = runScript(repoRoot, 'promote-candidate', {
     candidateId: 'refund',
     contextId: 'refund',
@@ -563,27 +902,8 @@ test('promote-candidate does not remove candidate when target context exists', (
     responsibilities: 'Own refund business language.',
     nonResponsibilities: 'Payment gateway settlement.',
     body: 'Refund context covers refund request terminology, after-sales handoff, and status vocabulary.',
-    capabilities: [
-      {
-        capabilityId: 'refund-request',
-        name: 'Refund Request',
-        summary: 'Handle refund request intake and handoff.',
-        responsibilities: 'Own refund request business flow.',
-        nonResponsibilities: 'Payment gateway settlement.',
-        body: 'Refund request starts from customer intent and ends with after-sales handoff.',
-        evidence: [
-          {
-            evidenceKind: 'routes',
-            name: 'Refund request routes',
-            summary: 'HTTP routes that enter refund request handling.',
-            source: 'repository',
-            generator: 'subagent-codegraph',
-            generation_evidence: 'CodeGraph inspected refund route and service entry points.',
-            body: 'Refund request route evidence links the HTTP entry to the refund request service.',
-          },
-        ],
-      },
-    ],
+    capabilityPlan: capabilityPlan('refund', capabilities),
+    capabilities,
   });
   assert.equal(result.status, 1);
   assert.equal(existsSync(join(repoRoot, 'docs/knowledge/candidates/refund.md')), true);
@@ -696,4 +1016,58 @@ test('create-evidence fills non-applicable sections with explicit fallback text'
   assert.match(text, /## 数据 \/ 消息\n\n- refund_requests.status/);
   assert.match(text, /## 前端入口\n\n本轮未发现或未覆盖前端入口/);
   assert.match(text, /## 限制与疑点\n\n暂无额外限制/);
+});
+
+test('create-evidence rejects flat call-flow and incomplete external evidence', () => {
+  const repoRoot = tempRepo();
+  runScript(repoRoot, 'create-context', {
+    contextId: 'order',
+    name: 'Order',
+    summary: 'Order lifecycle and after-sales handling.',
+    responsibilities: 'Own order lifecycle language.',
+    nonResponsibilities: 'Payment settlement internals.',
+    body: 'Order context covers order creation, cancellation, refund handoff, and after-sales vocabulary.',
+  });
+  runScript(repoRoot, 'create-capability', {
+    contextId: 'order',
+    capabilityId: 'refund',
+    name: 'Refund',
+    summary: 'Handle refunds.',
+    responsibilities: 'Refund request business flow.',
+    nonResponsibilities: 'Payment gateway settlement.',
+    body: 'Refund starts from a customer request and ends with after-sales status update.',
+  });
+
+  const flatCallFlow = runScript(repoRoot, 'create-evidence', {
+    contextId: 'order',
+    capabilityId: 'refund',
+    evidenceKind: 'call-flow',
+    name: 'Refund call flow',
+    summary: 'Call flow evidence for refund workflow.',
+    source: 'repository',
+    generator: 'manual',
+    generation_evidence: 'Reviewed refund service files.',
+    body: 'Refund call-flow evidence identifies refund service symbols.',
+    callRelations: '- RefundController\n- RefundService',
+  });
+  assert.equal(flatCallFlow.status, 2);
+  assert.match(JSON.parse(flatCallFlow.stdout).issues.map((issue) => issue.message).join('\n'), /directed Class#method -> Class#method chains/);
+
+  const incompleteExternal = runScript(repoRoot, 'create-evidence', {
+    contextId: 'order',
+    capabilityId: 'refund',
+    evidenceKind: 'external',
+    name: 'Refund external dependency',
+    summary: 'External dependency for refund workflow.',
+    source: 'repository',
+    generator: 'manual',
+    generation_evidence: 'Reviewed refund service files.',
+    body: 'Refund external evidence identifies the payment dependency.',
+    externalDependencies: '- PaymentClient#refund',
+    dependencyType: 'invalid-kind',
+  });
+  assert.equal(incompleteExternal.status, 2);
+  const messages = JSON.parse(incompleteExternal.stdout).issues.map((issue) => issue.message).join('\n');
+  assert.match(messages, /callers is required/);
+  assert.match(messages, /dependencyType is not supported/);
 });
