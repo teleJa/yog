@@ -38,7 +38,7 @@ function resolveKnowledgeRoot() {
 }
 
 function hookAdditionalContext(knowledgeRoot) {
-  return `Yog knowledge base: before business, design, interface, or implementation work, route through ${knowledgeRoot}/index.json, ${knowledgeRoot}/INDEX.md, and ${knowledgeRoot}/CONTEXT-MAP.md. If a matching business-flow exists, read it first as the end-to-end overview, then read the relevant context/capability/evidence documents.`;
+  return `Yog knowledge base: before business, design, interface, or implementation work, route through ${knowledgeRoot}/index.json, ${knowledgeRoot}/INDEX.md, and ${knowledgeRoot}/CONTEXT-MAP.md. If a matching business-flow exists, read it first, then read the relevant context/capability/evidence documents, including routing rules, common misjudgments, non-reuse boundaries, and stop-to-confirm checkpoints.`;
 }
 
 function hookMissingKnowledgeNotice(knowledgeRoot) {

@@ -58,6 +58,10 @@ test('init creates docs/knowledge skeleton config and managed blocks', () => {
   assert.equal(agents.match(blockPattern)[0], claude.match(blockPattern)[0]);
   assert.match(agents, /ask Yog to run install-hooks/);
   assert.match(agents, /Run automatic discover-candidates only when CodeGraph is initialized/);
+  assert.match(agents, /During design or coding/);
+  assert.match(agents, /common misjudgments/);
+  assert.match(agents, /non-reuse boundaries/);
+  assert.match(agents, /stop-to-confirm checkpoints/);
   const knowledgeReadme = readFileSync(join(repoRoot, 'docs/knowledge/README.md'), 'utf8');
   const knowledgeAgents = readFileSync(join(repoRoot, 'docs/knowledge/AGENTS.md'), 'utf8');
   assert.match(knowledgeReadme, /Automatic candidate discovery/);
@@ -192,6 +196,9 @@ test('upgrade-guidance refreshes a stale root managed block and preserves surrou
   const upgraded = readFileSync(join(repoRoot, 'AGENTS.md'), 'utf8');
   assert.match(upgraded, /first read docs\/knowledge\/index\.json, docs\/knowledge\/INDEX\.md, and docs\/knowledge\/CONTEXT-MAP\.md/);
   assert.match(upgraded, /matching business-flow entry/);
+  assert.match(upgraded, /common misjudgments/);
+  assert.match(upgraded, /non-reuse boundaries/);
+  assert.match(upgraded, /stop-to-confirm checkpoints/);
   assert.match(upgraded, /ask Yog to run install-hooks/);
   assert.match(upgraded, /After a change lands, re-check the evidence documents/);
   assert.doesNotMatch(upgraded, /Before answering business, architecture, feature, or implementation questions/);

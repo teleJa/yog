@@ -157,6 +157,49 @@ function parseMarkdownSections(markdown) {
   return new Map([...sections.entries()].map(([heading, lines]) => [heading, lines.join('\n').trim()]));
 }
 
+function hasAnySection(text, sectionNames) {
+  const sections = parseMarkdownSections(text);
+  return sectionNames.some((section) => sections.has(section));
+}
+
+function validDateString(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value ?? ''))) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function guidanceReviewIssues(path, text, data) {
+  const issues = [];
+  const hasPrescriptiveSection = hasAnySection(text, ['常见误判', 'Agent 开发指引']);
+  if (!hasPrescriptiveSection) return issues;
+  const reviewedAt = String(data.guidance_reviewed_at ?? '').trim();
+  const interval = Number(data.guidance_review_interval ?? 90);
+  if (!reviewedAt) {
+    issues.push(issue(data.status === 'verified' ? 'P1' : 'P2', '[review-due] Prescriptive guidance review date is missing.', path, {
+      field: 'guidance_reviewed_at',
+    }));
+    return issues;
+  }
+  if (!validDateString(reviewedAt)) {
+    issues.push(issue('P1', 'Prescriptive guidance review date must use YYYY-MM-DD.', path, {
+      field: 'guidance_reviewed_at',
+      value: reviewedAt,
+    }));
+    return issues;
+  }
+  const elapsedDays = Math.floor((Date.now() - new Date(`${reviewedAt}T00:00:00.000Z`).getTime()) / 86_400_000);
+  const effectiveInterval = Number.isFinite(interval) && interval > 0 ? interval : 90;
+  if (elapsedDays > effectiveInterval) {
+    issues.push(issue('P2', '[review-due] Prescriptive guidance review interval has elapsed.', path, {
+      field: 'guidance_reviewed_at',
+      reviewedAt,
+      intervalDays: effectiveInterval,
+      elapsedDays,
+    }));
+  }
+  return issues;
+}
+
 function missingSectionIssues(path, evidenceKind, text) {
   const sections = parseMarkdownSections(text);
   const issues = [];
@@ -202,20 +245,23 @@ function contextDocumentIssues(context, contextId, contextDir) {
   const readmeFile = join(contextDir, 'README.md');
   const issues = [];
   if (existsSync(contextFile)) {
+    const text = readFileSync(contextFile, 'utf8');
+    const data = parseFrontmatter(text).data;
     issues.push(...missingDocumentSectionIssues(
       repoRelative(repoRoot, contextFile),
       'Context',
-      readFileSync(contextFile, 'utf8'),
-      ['业务定位', '负责什么', '不负责什么'],
-      ['核心业务语言', '避免混用', '相关上下文', '未确认问题'],
+      text,
+      ['业务定位', '何时使用', '负责什么', '不负责什么', '需求路由规则', '常见误判'],
+      ['核心业务语言', '能力清单', '上游触发', '避免混用', '相关上下文', '验证入口', '未确认问题'],
     ));
+    issues.push(...guidanceReviewIssues(repoRelative(repoRoot, contextFile), text, data));
   }
   if (existsSync(readmeFile)) {
     issues.push(...missingDocumentSectionIssues(
       repoRelative(repoRoot, readmeFile),
       'Context README',
       readFileSync(readmeFile, 'utf8'),
-      ['一句话定位', '业务边界', '主要能力'],
+      ['一句话定位', '业务边界', '主要能力', '能力清单'],
       ['上下游关系', '相关文档', '未确认问题'],
     ));
   }
@@ -225,13 +271,15 @@ function contextDocumentIssues(context, contextId, contextDir) {
 }
 
 function capabilityDocumentIssues(context, file) {
+  const text = readFileSync(file, 'utf8');
+  const data = parseFrontmatter(text).data;
   return missingDocumentSectionIssues(
     repoRelative(context.repoRoot, file),
     'Capability',
-    readFileSync(file, 'utf8'),
-    ['一句话定位', '负责什么', '不负责什么', '典型流程'],
-    ['关键业务对象', '上下游关系', '设计意图 / 架构取舍', '代码事实入口', '验证方式', '未确认问题'],
-  );
+    text,
+    ['一句话定位', '负责什么', '不负责什么', '典型流程', 'Agent 开发指引'],
+    ['关键业务对象', '上下游关系', '设计意图 / 架构取舍', '代码事实入口', '常见误判', '验证方式', '未确认问题'],
+  ).concat(guidanceReviewIssues(repoRelative(context.repoRoot, file), text, data));
 }
 
 function evidenceShapeIssues(context, contextId, file, capabilityIds) {
@@ -290,9 +338,15 @@ export function lintKnowledgeBase(input = {}) {
     for (const file of markdownFiles(join(contextDir, 'evidence'))) {
       const text = readFileSync(file, 'utf8');
       const data = parseFrontmatter(text).data;
+      const evidencePath = repoRelative(repoRoot, file);
       issues.push(...statusIssues('evidence', data.status, repoRelative(repoRoot, file)));
       issues.push(...evidenceShapeIssues(context, contextId, file, capabilityIds));
       if (!EVIDENCE_KINDS.includes(data.evidence_kind)) issues.push(issue('P1', 'Evidence kind is not supported.', contextPath(knowledgeRoot, contextId, 'evidence')));
+      for (const field of ['repo_commit', 'generated_at', 'generator', 'generation_evidence']) {
+        if (!String(data[field] ?? '').trim()) {
+          issues.push(issue(data.status === 'verified' ? 'P1' : 'P2', 'Evidence generation metadata is missing.', evidencePath, { field }));
+        }
+      }
       if (data.status === 'verified' && (!data.source || !data.repo_commit || !data.generated_at || !data.generator || !data.generation_evidence)) {
         issues.push(issue('P1', 'Verified evidence requires generation confirmation fields.', contextPath(knowledgeRoot, contextId, 'evidence')));
       }

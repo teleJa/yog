@@ -107,6 +107,9 @@ test('copied hook script emits single-line context when CONTEXT-MAP exists', () 
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
   assert.equal(payload.hookSpecificOutput.additionalContext, hookAdditionalContext('docs/knowledge'));
+  assert.match(payload.hookSpecificOutput.additionalContext, /common misjudgments/);
+  assert.match(payload.hookSpecificOutput.additionalContext, /non-reuse boundaries/);
+  assert.match(payload.hookSpecificOutput.additionalContext, /stop-to-confirm checkpoints/);
 });
 
 test('copied hook script emits missing-knowledge notice when CONTEXT-MAP is absent', () => {

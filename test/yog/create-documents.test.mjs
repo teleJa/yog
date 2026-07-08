@@ -111,6 +111,85 @@ test('create-candidate writes optional duplicate-confirmed fields', () => {
   assert.match(text, /possible_contexts: \[order\]/);
 });
 
+test('create-context writes agent guidance sections and review metadata', () => {
+  const repoRoot = tempRepo();
+  const result = runScript(repoRoot, 'create-context', {
+    contextId: 'order',
+    name: 'Order',
+    summary: 'Order lifecycle and after-sales handling.',
+    responsibilities: 'Own order lifecycle language.',
+    nonResponsibilities: 'Payment settlement internals.',
+    body: 'Order context covers order creation, cancellation, refund handoff, and after-sales vocabulary.',
+    whenToUse: '- Use when order lifecycle changes are requested.',
+    routingRules: '- Route API changes to order controllers.',
+    commonMisjudgments: '- Misjudgment: Refund settlement belongs here.\n  Correct: Payment settlement is external.',
+    capabilityMatrix: '| 能力 | 作用 | 主要入口 | 适用场景 | 不适用场景 |\n| --- | --- | --- | --- | --- |\n| Refund | Handle refunds | RefundController | Refund request | Payment settlement |',
+  });
+  assert.equal(result.status, 0);
+  const contextText = readFileSync(join(repoRoot, 'docs/knowledge/contexts/order/CONTEXT.md'), 'utf8');
+  assert.match(contextText, /guidance_reviewed_at: \d{4}-\d{2}-\d{2}/);
+  assert.match(contextText, /## 何时使用\n\n- Use when order lifecycle changes are requested\./);
+  assert.match(contextText, /## 需求路由规则\n\n- Route API changes to order controllers\./);
+  assert.match(contextText, /## 常见误判\n\n- Misjudgment: Refund settlement belongs here\./);
+  assert.match(contextText, /## 能力清单\n\n\| 能力 \| 作用 \| 主要入口 \| 适用场景 \| 不适用场景 \|/);
+  const readmeText = readFileSync(join(repoRoot, 'docs/knowledge/contexts/order/README.md'), 'utf8');
+  assert.match(readmeText, /## 能力清单\n\n\| 能力 \| 作用 \| 主要入口 \| 适用场景 \| 不适用场景 \|/);
+});
+
+test('create-capability and evidence write development guidance and metadata', () => {
+  const repoRoot = tempRepo();
+  assert.equal(runScript(repoRoot, 'create-context', {
+    contextId: 'order',
+    name: 'Order',
+    summary: 'Order lifecycle and after-sales handling.',
+    responsibilities: 'Own order lifecycle language.',
+    nonResponsibilities: 'Payment settlement internals.',
+    body: 'Order context covers order creation, cancellation, refund handoff, and after-sales vocabulary.',
+  }).status, 0);
+  assert.equal(runScript(repoRoot, 'create-capability', {
+    contextId: 'order',
+    capabilityId: 'refund',
+    name: 'Refund',
+    summary: 'Handle refunds.',
+    responsibilities: 'Refund request business flow.',
+    nonResponsibilities: 'Payment gateway settlement.',
+    body: 'Refund starts from a customer request and ends with after-sales status update.',
+    reuseGuidance: '- Reuse RefundController and RefundService.',
+    doNotReuseGuidance: '- Do not bypass refund status checks.',
+    confirmationRequired: '- Confirm payment gateway callback semantics.',
+    commonMisjudgments: '- Misjudgment: direct DB update is enough.\n  Correct: use service workflow.',
+    developmentVerification: '- Run refund request API regression.',
+  }).status, 0);
+  const capabilityText = readFileSync(join(repoRoot, 'docs/knowledge/contexts/order/capabilities/refund.md'), 'utf8');
+  assert.match(capabilityText, /guidance_reviewed_at: \d{4}-\d{2}-\d{2}/);
+  assert.match(capabilityText, /## Agent 开发指引\n\n### 优先复用\n\n- Reuse RefundController and RefundService\./);
+  assert.match(capabilityText, /### 不要复用\n\n- Do not bypass refund status checks\./);
+  assert.match(capabilityText, /### 停下来确认\n\n- Confirm payment gateway callback semantics\./);
+  assert.match(capabilityText, /## 常见误判\n\n- Misjudgment: direct DB update is enough\./);
+  assert.equal(runScript(repoRoot, 'create-evidence', {
+    contextId: 'order',
+    capabilityId: 'refund',
+    evidenceKind: 'routes',
+    name: 'Refund routes',
+    summary: 'HTTP routes that enter the refund workflow.',
+    source: 'repository',
+    repo_commit: 'abc123',
+    generated_at: '2026-07-08T00:00:00.000Z',
+    generator: 'manual',
+    generation_evidence: 'Reviewed route files in current repository.',
+    body: 'Route POST /refunds starts refund request handling.',
+    entryPaths: '- src/refund/controller.js',
+    routes: '- POST /refunds',
+    developmentVerification: '- Exercise POST /refunds with valid and invalid payloads.',
+    limitations: '- Test fixture does not execute runtime HTTP calls.',
+  }).status, 0);
+  const evidenceText = readFileSync(join(repoRoot, 'docs/knowledge/contexts/order/evidence/refund-routes.md'), 'utf8');
+  assert.match(evidenceText, /repo_commit: abc123/);
+  assert.match(evidenceText, /generated_at: 2026-07-08T00:00:00.000Z/);
+  assert.match(evidenceText, /## 生成证据\n\nReviewed route files in current repository\./);
+  assert.match(evidenceText, /## 开发验证建议\n\n- Exercise POST \/refunds with valid and invalid payloads\./);
+});
+
 test('create-candidate fills candidate sections and writes code symbols', () => {
   const repoRoot = tempRepo();
   const result = runScript(repoRoot, 'create-candidate', {

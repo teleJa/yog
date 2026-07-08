@@ -5,13 +5,14 @@
 // Two-sentence core instruction reused verbatim inside the managed block's first rules.
 export function routingCoreInstruction(knowledgeRoot = 'docs/knowledge') {
   return `Before requirement analysis, solution design, interface changes, or business-rule judgments, first read ${knowledgeRoot}/index.json, ${knowledgeRoot}/INDEX.md, and ${knowledgeRoot}/CONTEXT-MAP.md.
-- If a matching business-flow entry exists, read it first as the end-to-end overview. Then select relevant contexts and read their CONTEXT.md, capability, and evidence documents before designing or changing behavior.`;
+- If a matching business-flow entry exists, read it first as the end-to-end overview. Then select relevant contexts and read their CONTEXT.md, capability, and evidence documents before designing or changing behavior.
+- During design or coding, follow the selected context/capability routing rules, common misjudgments, non-reuse boundaries, and stop-to-confirm checkpoints before choosing implementation files.`;
 }
 
 // Compact instruction + routing-table pointer injected every turn by the hook.
 // Kept short on purpose: the hook fires on every prompt, so token cost matters.
 export function hookAdditionalContext(knowledgeRoot = 'docs/knowledge') {
-  return `Yog knowledge base: before business, design, interface, or implementation work, route through ${knowledgeRoot}/index.json, ${knowledgeRoot}/INDEX.md, and ${knowledgeRoot}/CONTEXT-MAP.md. If a matching business-flow exists, read it first as the end-to-end overview, then read the relevant context/capability/evidence documents.`;
+  return `Yog knowledge base: before business, design, interface, or implementation work, route through ${knowledgeRoot}/index.json, ${knowledgeRoot}/INDEX.md, and ${knowledgeRoot}/CONTEXT-MAP.md. If a matching business-flow exists, read it first, then read the relevant context/capability/evidence documents, including routing rules, common misjudgments, non-reuse boundaries, and stop-to-confirm checkpoints.`;
 }
 
 // Notice injected when the repository has no initialized Yog knowledge base.

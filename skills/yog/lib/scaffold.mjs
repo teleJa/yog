@@ -431,10 +431,15 @@ function replaceTemplateValue(markdown, token, value) {
   return markdown.split(`{${token}}`).join(value);
 }
 
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function injectAfterHeading(markdown, heading, content) {
   const marker = `## ${heading}`;
-  if (!markdown.includes(marker)) return `${markdown.trim()}\n\n${content}\n`;
-  return markdown.replace(marker, `${marker}\n\n${content}`);
+  const pattern = new RegExp(`^${escapeRegExp(marker)}$`, 'm');
+  if (!pattern.test(markdown)) return `${markdown.trim()}\n\n${content}\n`;
+  return markdown.replace(pattern, `${marker}\n\n${content}`);
 }
 
 function injectOptionalAfterHeading(markdown, heading, content) {
@@ -1100,6 +1105,60 @@ function formatReadmeUpstreamDownstream(capabilities) {
     .join('\n\n');
 }
 
+function todayDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function capabilityMatrixFromCapabilities(capabilities) {
+  if (!Array.isArray(capabilities) || capabilities.length === 0) return '';
+  const rows = capabilities.map((capability) => {
+    const entry = asText(capability.codeFactEntries) || asText(collectEvidenceSection(capability, 'entryPaths')) || '待确认';
+    const usage = asText(capability.responsibilities).split('\n').find(Boolean) ?? capability.summary;
+    const nonUsage = asText(capability.nonResponsibilities).split('\n').find(Boolean) ?? '按不负责边界确认';
+    return `| ${capability.name} | ${capability.summary} | ${entry} | ${usage} | ${nonUsage} |`;
+  });
+  return ['| 能力 | 作用 | 主要入口 | 适用场景 | 不适用场景 |', '| --- | --- | --- | --- | --- |', ...rows].join('\n');
+}
+
+function agentDevelopmentGuidance(payload) {
+  if (payload.agentDevelopmentGuidance) return payload.agentDevelopmentGuidance;
+  const reuse = sectionText(payload.reuseGuidance, '- 优先复用本能力既有入口和服务实现，避免新增平行链路。');
+  const doNotReuse = sectionText(payload.doNotReuseGuidance, '- 不要承担“不负责什么”中列出的边界外职责。');
+  const confirm = sectionText(payload.confirmationRequired, '- 需求触及外部依赖、状态口径、数据一致性或相邻上下文边界时，先确认契约。');
+  const breakdown = sectionText(
+    payload.developmentTaskBreakdown,
+    [
+      '- 契约变更：确认 controller/Dubbo/消息入口与 DTO/VO。',
+      '- 业务规则：确认 service/manager 中的规则落点。',
+      '- 数据落库：确认 mapper/entity/table 或缓存变更。',
+      '- 外部依赖：确认下游 wrapper、平台 API 或消息生产方契约。',
+      '- 测试验证：覆盖主路径、边界情况和错误路径。',
+    ].join('\n'),
+  );
+  const verification = sectionText(payload.developmentVerification, payload.verificationMethod ?? '- 按本能力验证方式和 linked evidence 设计最小回归。');
+  return [
+    '### 优先复用',
+    '',
+    reuse,
+    '',
+    '### 不要复用',
+    '',
+    doNotReuse,
+    '',
+    '### 停下来确认',
+    '',
+    confirm,
+    '',
+    '### 开发任务拆分',
+    '',
+    breakdown,
+    '',
+    '### 验证方式',
+    '',
+    verification,
+  ].join('\n');
+}
+
 function capabilityEvidencePaths(knowledgeRoot, contextId, capability) {
   return (capability.evidence ?? [])
     .map((evidence) => contextPath(knowledgeRoot, contextId, 'evidence', `${capability.capabilityId}-${evidence.evidenceKind}.md`));
@@ -1421,7 +1480,14 @@ export function createContext(input) {
     '暂无未确认问题；如需升级 verified，应补充人工确认、测试记录或生产证据。',
   );
   let contextMarkdown = replaceTemplateValue(contextTemplate.text, 'Context Name', payload.name);
+  contextMarkdown = replaceLine(contextMarkdown, 'guidance_reviewed_at', payload.guidanceReviewedAt ?? payload.guidance_reviewed_at ?? todayDate());
+  contextMarkdown = replaceLine(contextMarkdown, 'guidance_review_interval', payload.guidanceReviewInterval ?? payload.guidance_review_interval ?? 90);
   contextMarkdown = injectAfterHeading(contextMarkdown, '业务定位', payload.body);
+  contextMarkdown = injectAfterHeading(
+    contextMarkdown,
+    '何时使用',
+    sectionText(payload.whenToUse ?? payload.triggerSignals, `需求明确命中「${payload.name}」的业务边界、能力、入口或术语时使用本 Context。`),
+  );
   contextMarkdown = injectAfterHeading(contextMarkdown, '负责什么', payload.responsibilities);
   contextMarkdown = injectAfterHeading(contextMarkdown, '不负责什么', payload.nonResponsibilities);
   contextMarkdown = injectAfterHeading(
@@ -1431,10 +1497,35 @@ export function createContext(input) {
   );
   contextMarkdown = injectAfterHeading(
     contextMarkdown,
+    '能力清单',
+    sectionText(payload.capabilityMatrix ?? payload.primaryCapabilities, '暂无已确认能力清单；创建 capability 文档后补充到本节。'),
+  );
+  contextMarkdown = injectAfterHeading(
+    contextMarkdown,
+    '上游触发',
+    sectionText(payload.upstreamTriggers, 'API/Event/Job/Internal 触发入口待补充；开发前应结合 capability/evidence 确认。'),
+  );
+  contextMarkdown = injectAfterHeading(
+    contextMarkdown,
+    '需求路由规则',
+    sectionText(payload.routingRules, `先判断需求是否属于「${payload.name}」边界，再选择匹配 capability 和 linked evidence；命中不负责事项时转相关上下文。`),
+  );
+  contextMarkdown = injectAfterHeading(
+    contextMarkdown,
     '避免混用',
     sectionText(payload.avoidConfusion, payload.nonResponsibilities),
   );
+  contextMarkdown = injectAfterHeading(
+    contextMarkdown,
+    '常见误判',
+    sectionText(payload.commonMisjudgments, '暂无已确认域级误判；如发现 Agent 高频误路由，应补充误判、正确判断和原因。'),
+  );
   contextMarkdown = injectAfterHeading(contextMarkdown, '相关上下文', relatedContexts);
+  contextMarkdown = injectAfterHeading(
+    contextMarkdown,
+    '验证入口',
+    sectionText(payload.verificationEntry, '先读取相关 capability 的验证方式和 evidence 的开发验证建议，再执行代码级验证。'),
+  );
   contextMarkdown = injectAfterHeading(contextMarkdown, '未确认问题', openQuestions);
   let readmeMarkdown = replaceTemplateValue(readmeTemplate.text, 'Context Name', payload.name);
   readmeMarkdown = injectAfterHeading(readmeMarkdown, '一句话定位', payload.summary);
@@ -1443,6 +1534,11 @@ export function createContext(input) {
     readmeMarkdown,
     '主要能力',
     sectionText(payload.primaryCapabilities, '暂无已确认主要能力；创建 capability 文档后补充到本节。'),
+  );
+  readmeMarkdown = injectAfterHeading(
+    readmeMarkdown,
+    '能力清单',
+    sectionText(payload.capabilityMatrix ?? payload.primaryCapabilities, '暂无已确认能力清单；创建 capability 文档后补充到本节。'),
   );
   readmeMarkdown = injectAfterHeading(
     readmeMarkdown,
@@ -1539,8 +1635,16 @@ export function promoteCandidate(input) {
       relatedContexts: payload.relatedContexts,
       openQuestions: payload.openQuestions,
       primaryCapabilities: payload.primaryCapabilities ?? capabilitySummaryList(capabilities),
+      capabilityMatrix: payload.capabilityMatrix ?? capabilityMatrixFromCapabilities(capabilities),
       upstreamDownstream: payload.upstreamDownstream ?? upstreamDownstream,
       relatedDocs: payload.relatedDocs ?? relatedDocs,
+      whenToUse: payload.whenToUse ?? payload.triggerSignals,
+      upstreamTriggers: payload.upstreamTriggers,
+      routingRules: payload.routingRules,
+      commonMisjudgments: payload.commonMisjudgments,
+      verificationEntry: payload.verificationEntry,
+      guidanceReviewedAt: payload.guidanceReviewedAt ?? payload.guidance_reviewed_at ?? generatedAt.slice(0, 10),
+      guidanceReviewInterval: payload.guidanceReviewInterval ?? payload.guidance_review_interval,
     },
   });
   if (contextResult.code !== 0) return contextResult;
@@ -1561,11 +1665,20 @@ export function promoteCandidate(input) {
         upstreamDownstream: capability.upstreamDownstream || collectEvidenceSection(capability, 'callRelations') || collectEvidenceSection(capability, 'routes'),
         designIntent: capability.designIntent,
         codeFactEntries: capability.codeFactEntries ?? collectEvidenceSection(capability, 'entryPaths'),
+        agentDevelopmentGuidance: capability.agentDevelopmentGuidance,
+        reuseGuidance: capability.reuseGuidance,
+        doNotReuseGuidance: capability.doNotReuseGuidance,
+        confirmationRequired: capability.confirmationRequired,
+        developmentTaskBreakdown: capability.developmentTaskBreakdown,
+        commonMisjudgments: capability.commonMisjudgments,
+        developmentVerification: capability.developmentVerification,
         verificationMethod: capability.verificationMethod ?? (capability.evidence ?? [])
           .map((evidence) => `- ${evidence.evidenceKind}: ${evidence.generationMethod ?? evidence.generation_evidence}`)
           .join('\n'),
         openQuestions: capability.openQuestions ?? collectEvidenceSection(capability, 'limitations'),
         evidencePaths: capabilityEvidencePaths(knowledgeRoot, contextId, capability),
+        guidanceReviewedAt: capability.guidanceReviewedAt ?? capability.guidance_reviewed_at ?? generatedAt.slice(0, 10),
+        guidanceReviewInterval: capability.guidanceReviewInterval ?? capability.guidance_review_interval,
       },
     });
     if (capabilityResult.code !== 0) return {
@@ -1649,6 +1762,8 @@ export function createCapability(input) {
   markdown = replaceLine(markdown, 'name', payload.name);
   markdown = replaceLine(markdown, 'summary', payload.summary);
   markdown = replaceLine(markdown, 'evidence', formatInlineList(payload.evidencePaths));
+  markdown = replaceLine(markdown, 'guidance_reviewed_at', payload.guidanceReviewedAt ?? payload.guidance_reviewed_at ?? todayDate());
+  markdown = replaceLine(markdown, 'guidance_review_interval', payload.guidanceReviewInterval ?? payload.guidance_review_interval ?? 90);
   markdown = replaceTemplateValue(markdown, 'Business Capability Name', payload.name);
   markdown = injectAfterHeading(markdown, '一句话定位', payload.summary);
   markdown = injectAfterHeading(markdown, '负责什么', payload.responsibilities);
@@ -1673,6 +1788,12 @@ export function createCapability(input) {
     markdown,
     '代码事实入口',
     sectionText(payload.codeFactEntries, '暂无已确认代码事实入口；补充 routes/call-flow/data evidence 后维护本节。'),
+  );
+  markdown = injectAfterHeading(markdown, 'Agent 开发指引', agentDevelopmentGuidance(payload));
+  markdown = injectAfterHeading(
+    markdown,
+    '常见误判',
+    sectionText(payload.commonMisjudgments, '暂无已确认能力级误判；如发现 Agent 改错链路，应补充误判、正确判断和原因。'),
   );
   markdown = injectAfterHeading(
     markdown,
@@ -1718,6 +1839,8 @@ export function createEvidence(input) {
   let markdown = template.text;
   markdown = replaceLine(markdown, 'evidence_kind', payload.evidenceKind);
   markdown = replaceLine(markdown, 'source', payload.source);
+  markdown = replaceLine(markdown, 'repo_commit', payload.repo_commit ?? payload.repoCommit ?? 'unknown');
+  markdown = replaceLine(markdown, 'generated_at', payload.generated_at ?? payload.generatedAt ?? new Date().toISOString());
   markdown = replaceLine(markdown, 'generator', payload.generator);
   markdown = replaceLine(markdown, 'generation_evidence', payload.generation_evidence);
   markdown = replaceLine(markdown, 'capability', payload.capabilityId);
@@ -1730,6 +1853,12 @@ export function createEvidence(input) {
   markdown = injectEvidenceSection(markdown, payload.evidenceKind, '调用关系', payload.callRelations);
   markdown = injectEvidenceSection(markdown, payload.evidenceKind, '数据 / 消息', payload.dataMessages);
   markdown = injectEvidenceSection(markdown, payload.evidenceKind, '前端入口', payload.frontendEntries);
+  markdown = injectAfterHeading(markdown, '生成证据', payload.generation_evidence);
+  markdown = injectAfterHeading(
+    markdown,
+    '开发验证建议',
+    sectionText(payload.developmentVerification, '当前 evidence 仅提供代码事实；开发验证需结合 capability 验证方式补充。'),
+  );
   markdown = injectAfterHeading(markdown, '限制与疑点', sectionText(payload.limitations, '暂无额外限制；升级 verified 前仍需补充确认来源。'));
   writeMarkdown(target, markdown);
   return { code: 0, output: { issues: [] } };

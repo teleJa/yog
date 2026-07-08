@@ -10,6 +10,8 @@ evidence: []
 confirmation_sources: []
 status: draft
 updated_at: ""
+guidance_reviewed_at: ""
+guidance_review_interval: 90
 ---
 
 # {Business Capability Name}
@@ -29,6 +31,20 @@ updated_at: ""
 ## 设计意图 / 架构取舍
 
 ## 代码事实入口
+
+## Agent 开发指引
+
+### 优先复用
+
+### 不要复用
+
+### 停下来确认
+
+### 开发任务拆分
+
+### 验证方式
+
+## 常见误判
 
 ## 验证方式
 

@@ -22,9 +22,9 @@ Yog 提供一套仓库内知识协议：
 
 - `CONTEXT-MAP.md`：给 agent 看的业务路由表。
 - `business-flows/`：跨 context 的端到端业务流程。
-- `contexts/<context-id>/CONTEXT.md`：正式业务上下文边界。
-- `capabilities/`：该 context 承担的能力。
-- `evidence/`：把业务结论锚定到代码、路由、表、消息、测试或人工确认来源。
+- `contexts/<context-id>/CONTEXT.md`：正式业务上下文边界、何时使用、需求路由规则、域级常见误判和验证入口。
+- `capabilities/`：该 context 承担的能力，并给 agent 提供开发落点指引：优先复用什么、不要复用什么、什么时候停下来确认、如何拆任务和验证。
+- `evidence/`：把业务结论锚定到代码、路由、表、消息、测试或人工确认来源，并记录生成元数据和开发验证建议。
 - `candidates/`：尚未确认、待 review 的业务上下文候选。
 - `index.json` / `INDEX.md`：生成索引，用于路由、检查和 smoke 诊断。
 
@@ -150,6 +150,14 @@ Claude Code 的 `.claude/settings.json` 会自动合并更新。Codex 的 `confi
 
 候选升级会把一个已 review 的 candidate 转成正式 context，并创建至少一个真实 capability 和一个真实 evidence。只生成空 context 壳不算完成。
 
+正式知识文档的目标不是只归档结论，而是指导 agent 开发：
+
+- Context 文档承载业务边界、何时使用、需求路由规则、能力矩阵、域级常见误判，以及 prescriptive guidance 的人工复核时间。
+- Capability 文档承载能力级职责和 agent 开发指引：复用路径、禁止复用边界、停下确认点、任务拆分、验证方式和能力级常见误判。
+- Evidence 文档承载代码事实锚点：入口路径、路由、调用关系、数据/消息、前端入口、生成证据和开发验证建议。
+
+常见误判、开发指引这类红线内容只由人判断是否仍有效，机器不根据代码 diff 自动裁判。`guidance_reviewed_at` 记录上次人工复核日期。lint 会在非 verified 文档缺复核日期或复核周期到期时输出 P2 `[review-due]` 提醒；verified capability 的开发指引缺复核日期会成为 P1 门禁。
+
 ### 同步与验证
 
 Yog 的索引是确定性生成物：
@@ -157,7 +165,7 @@ Yog 的索引是确定性生成物：
 - `sync.mjs`：重建索引并执行 lint。
 - `verify.mjs`：只检查索引和 lint，不写文件。
 - `check-index.mjs`：比较索引是否需要更新，不写文件。
-- `lint.mjs`：检查结构、必填章节、路径、状态和路由安全性。
+- `lint.mjs`：检查结构、必填章节、路径、状态、路由安全性、证据元数据和指导内容复核提醒。
 
 ## 脚本协议
 

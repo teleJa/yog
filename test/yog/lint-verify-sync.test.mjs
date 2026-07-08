@@ -284,15 +284,33 @@ test('lint reports empty context, readme, and capability sections', () => {
 
 Order lifecycle context.
 
+## 何时使用
+
+Use when order lifecycle changes are requested.
+
 ## 负责什么
 
 ## 不负责什么
 
 ## 核心业务语言
 
+## 能力清单
+
+## 上游触发
+
+## 需求路由规则
+
+Route API changes to order controllers.
+
 ## 避免混用
 
+## 常见误判
+
+暂无已确认域级误判。
+
 ## 相关上下文
+
+## 验证入口
 
 ## 未确认问题
 `);
@@ -305,6 +323,8 @@ Order lifecycle context.
 ## 业务边界
 
 ## 主要能力
+
+## 能力清单
 
 ## 上下游关系
 
@@ -352,6 +372,20 @@ Refund starts from a customer request and ends with after-sales status update.
 
 ## 代码事实入口
 
+## Agent 开发指引
+
+### 优先复用
+
+### 不要复用
+
+### 停下来确认
+
+### 开发任务拆分
+
+### 验证方式
+
+## 常见误判
+
 ## 验证方式
 
 ## 未确认问题
@@ -365,12 +399,68 @@ Refund starts from a customer request and ends with after-sales status update.
   );
   assert.deepEqual(
     issues.filter((item) => item.message === 'Context README required section is empty.').map((item) => item.details.section).sort(),
-    ['业务边界', '主要能力'].sort(),
+    ['业务边界', '主要能力', '能力清单'].sort(),
   );
   assert.deepEqual(
     issues.filter((item) => item.message === 'Capability recommended section is empty.').map((item) => item.details.section).sort(),
-    ['上下游关系', '代码事实入口', '关键业务对象', '设计意图 / 架构取舍', '未确认问题', '验证方式'].sort(),
+    ['上下游关系', '代码事实入口', '关键业务对象', '常见误判', '设计意图 / 架构取舍', '未确认问题', '验证方式'].sort(),
   );
+});
+
+test('lint reports guidance review due and verified missing date according to status', () => {
+  const repoRoot = repo();
+  run(repoRoot, 'create-context', {
+    contextId: 'order',
+    name: 'Order',
+    summary: 'Order lifecycle and after-sales handling.',
+    responsibilities: 'Own order lifecycle language.',
+    nonResponsibilities: 'Payment settlement internals.',
+    body: 'Order context covers order creation, cancellation, refund handoff, and after-sales vocabulary.',
+  });
+  run(repoRoot, 'create-capability', {
+    contextId: 'order',
+    capabilityId: 'refund',
+    name: 'Refund',
+    summary: 'Handle refunds.',
+    responsibilities: 'Refund request business flow.',
+    nonResponsibilities: 'Payment gateway settlement.',
+    body: 'Refund starts from a customer request and ends with after-sales status update.',
+  });
+  let contextText = readFileSync(join(repoRoot, 'docs/knowledge/contexts/order/CONTEXT.md'), 'utf8');
+  contextText = contextText.replace(/^guidance_reviewed_at:.*$/m, 'guidance_reviewed_at: ""');
+  writeFileSync(join(repoRoot, 'docs/knowledge/contexts/order/CONTEXT.md'), contextText);
+
+  let capabilityText = readFileSync(join(repoRoot, 'docs/knowledge/contexts/order/capabilities/refund.md'), 'utf8');
+  capabilityText = capabilityText.replace(/^status: draft$/m, 'status: verified');
+  capabilityText = capabilityText.replace(/^guidance_reviewed_at:.*$/m, 'guidance_reviewed_at: ""');
+  capabilityText = capabilityText.replace(/^confirmation_sources: \[\]$/m, 'confirmation_sources: [manual-review]');
+  writeFileSync(join(repoRoot, 'docs/knowledge/contexts/order/capabilities/refund.md'), capabilityText);
+
+  const result = run(repoRoot, 'lint');
+  assert.equal(result.status, 1);
+  const issues = JSON.parse(result.stdout).issues;
+  const contextIssue = issues.find((item) => item.path.endsWith('/CONTEXT.md') && item.message.includes('[review-due]'));
+  assert.equal(contextIssue.severity, 'P2');
+  const capabilityIssue = issues.find((item) => item.path.endsWith('/capabilities/refund.md') && item.message.includes('[review-due]'));
+  assert.equal(capabilityIssue.severity, 'P1');
+});
+
+test('lint reports P2 when guidance review interval has elapsed', () => {
+  const repoRoot = repo();
+  run(repoRoot, 'create-context', {
+    contextId: 'order',
+    name: 'Order',
+    summary: 'Order lifecycle and after-sales handling.',
+    responsibilities: 'Own order lifecycle language.',
+    nonResponsibilities: 'Payment settlement internals.',
+    body: 'Order context covers order creation, cancellation, refund handoff, and after-sales vocabulary.',
+    guidanceReviewedAt: '2000-01-01',
+    guidanceReviewInterval: 1,
+  });
+  const result = run(repoRoot, 'lint');
+  assert.equal(result.status, 0);
+  const issues = JSON.parse(result.stdout).issues;
+  assert.equal(issues.some((item) => item.severity === 'P2' && item.message.includes('[review-due]')), true);
 });
 
 test('lint accepts evidence kinds that contain hyphens', () => {

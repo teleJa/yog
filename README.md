@@ -16,9 +16,9 @@ Yog provides a repository-local knowledge protocol:
 
 - `CONTEXT-MAP.md` gives agents a business routing map.
 - `business-flows/` describes cross-context workflows.
-- `contexts/<context-id>/CONTEXT.md` defines a business boundary.
-- `capabilities/` records what a context is responsible for.
-- `evidence/` ties business claims back to code, routes, tables, messages, tests, or human-reviewed sources.
+- `contexts/<context-id>/CONTEXT.md` defines a business boundary, when to use it, routing rules, common domain-level misjudgments, and validation entry points.
+- `capabilities/` records what a context is responsible for and gives agents implementation landing guidance: what to reuse, what not to reuse, when to stop and confirm, and how to verify changes.
+- `evidence/` ties business claims back to code, routes, tables, messages, tests, or human-reviewed sources, with generation metadata and development verification suggestions.
 - `candidates/` stores unconfirmed business-context candidates before promotion.
 - generated `index.json` and `INDEX.md` make the knowledge base easy to route and verify.
 
@@ -144,6 +144,14 @@ If CodeGraph is missing, Yog stops automatic discovery instead of guessing from 
 
 Candidate promotion turns a reviewed candidate into a formal context with at least one real capability and one real evidence document. Empty context shells are treated as invalid.
 
+Formal knowledge is intended to guide implementation, not just archive conclusions:
+
+- Context documents carry business boundaries, "when to use" triggers, routing rules, capability matrices, domain-level common misjudgments, and review timestamps for prescriptive guidance.
+- Capability documents carry capability-level responsibilities plus agent development guidance: reuse paths, non-reuse boundaries, confirmation checkpoints, task breakdown, verification, and capability-level common misjudgments.
+- Evidence documents carry code-fact anchors such as entry paths, routes, call relations, data/messages, frontend entries, generation evidence, and development verification suggestions.
+
+Prescriptive sections such as common misjudgments and agent development guidance are reviewed by people, not judged by code diffs. `guidance_reviewed_at` records the last human review date. Lint emits `[review-due]` P2 reminders when guidance is missing a review date in non-verified documents or when the review interval has elapsed; verified capability guidance without a review date is a P1 gate.
+
 ### Sync And Verify
 
 Yog keeps generated indexes deterministic:
@@ -151,7 +159,7 @@ Yog keeps generated indexes deterministic:
 - `sync.mjs` rebuilds indexes and runs lint.
 - `verify.mjs` checks indexes and lint without writing.
 - `check-index.mjs` compares generated output without modifying files.
-- `lint.mjs` validates structure, required sections, paths, and routing safety.
+- `lint.mjs` validates structure, required sections, paths, routing safety, evidence metadata, and guidance review reminders.
 
 ## Script Protocol
 
