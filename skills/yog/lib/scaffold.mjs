@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync,
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CODE_SYMBOL_PATTERN, EVIDENCE_KINDS, ID_PATTERN } from './constants.mjs';
-import { DEFAULT_DISCOVER_CONFIG, mergeConfig, writeConfig } from './config.mjs';
+import { DEFAULT_DISCOVER_CONFIG, DEFAULT_LANGUAGE, DEFAULT_WIKI_CONFIG, mergeConfig, writeConfig } from './config.mjs';
 import { parseFrontmatter, stringifyFrontmatter } from './frontmatter.mjs';
 import { hasRealBodyContent, hasTemplatePlaceholder } from './markdown.mjs';
 import { contextPath, knowledgePath, readRepoConfig, repoRelative, resolveRepoContext } from './knowledge-root.mjs';
@@ -45,8 +45,10 @@ export function initKnowledgeBase(input = {}) {
   const merged = mergeConfig(existing, {
     schemaVersion: 1,
     knowledgeRoot: context.knowledgeRoot,
+    language: input.payload?.language ?? existing.language ?? DEFAULT_LANGUAGE,
     codeFactProvider: input.payload?.codeFactProvider ?? existing.codeFactProvider ?? { type: 'codegraph', status: 'configured' },
     discover: existing.discover ?? DEFAULT_DISCOVER_CONFIG,
+    wiki: input.payload?.wiki ?? existing.wiki ?? DEFAULT_WIKI_CONFIG,
   });
   writeConfig(context.repoRoot, merged);
   writeRootManagedBlocks(context.repoRoot, context.knowledgeRoot);

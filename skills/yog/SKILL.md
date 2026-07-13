@@ -1,6 +1,6 @@
 ---
 name: yog
-description: General Yog docs/knowledge business knowledge-base skill and fallback router. Use for broad Yog questions, routing business knowledge, review or promotion workflows, business-flow overviews, calibration, or when a more specific Yog skill does not match. Prefer yog:init for initialization, yog:discover-candidates for candidate discovery, and yog:sync-verify for sync or verify requests.
+description: General Yog docs/knowledge business knowledge-base skill and fallback router. Use for broad Yog questions, routing business knowledge, review or promotion workflows, business-flow overviews, calibration, or when a more specific Yog skill does not match. Prefer yog:init for knowledge-base initialization, yog:discover-candidates for candidate discovery, yog:sync-verify for sync or verify requests, and yog:wiki for focused product Wiki generation.
 ---
 
 # Yog
@@ -10,6 +10,9 @@ Use Yog as the general docs/knowledge business knowledge-base skill and fallback
 - `yog:init` for repository initialization and the post-init discover question.
 - `yog:discover-candidates` for automatic candidate discovery.
 - `yog:sync-verify` for sync, verify, build-index, check-index, and lint.
+- `yog:wiki` for a focused product Wiki from a confirmed menu scope, optional Record, Requirement or Spec context, and user-provided code paths.
+
+`yog:wiki` exposes only `yog:wiki generate`. Menu descriptions define first-level directories and second-level product features. Record, Requirement, and Spec inputs are optional; only Record may create a user scenario. CodeGraph may enrich the selected implementation path but is not required because exact routes, network paths, and text search may provide partial code evidence. The MVP publishes a complete managed Wiki replacement after deterministic evidence, link, sensitive-content, and output checks; it does not expose refresh, verify, resume, Reader, or Evidence Judge workflows.
 
 Use this general skill when the user asks to route business knowledge, review candidates, promote candidates, create a business-flow overview, test semantic recall, calibrate overlap, or when a more specific Yog skill does not match.
 
@@ -41,7 +44,7 @@ Exit code `0` means completed, P2-only, or a partial-success gate that still all
 
 ## Scripts
 
-- `init.mjs`: copy `templates/knowledge` into the target repository, write `.yog/config.json` with `discover.maxMidLowCandidates`, and update root `AGENTS.md` and `CLAUDE.md` managed blocks.
+- `init.mjs`: copy `templates/knowledge` into the target repository, write `.yog/config.json` with default `language: "zh-CN"` and `discover.maxMidLowCandidates`, and update root `AGENTS.md` and `CLAUDE.md` managed blocks.
 - `upgrade-guidance.mjs`: compare or replace target `docs/knowledge/AGENTS.md` and `README.md`, and refresh the root `AGENTS.md` and `CLAUDE.md` Yog managed blocks, with the current Yog templates.
 - `install-hooks.mjs`: copy the `UserPromptSubmit` hook script into the target repository's `.claude/hooks/` and `.codex/hooks/`, upsert the Claude `.claude/settings.json` hook entry, and return a manual-enable hint for Codex `config.toml`. `payload.platforms` limits which platforms are installed.
 - `reduce-candidates.mjs`: reduce 3 lens subagent JSON outputs into JOINed candidate payloads, gate on medium+low confidence count, and precheck disk duplicates without writing candidate files.

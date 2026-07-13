@@ -1,12 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 const skill = readFileSync('skills/yog/SKILL.md', 'utf8');
 const initSkill = readFileSync('skills/init/SKILL.md', 'utf8');
 const discoverSkill = readFileSync('skills/discover-candidates/SKILL.md', 'utf8');
 const businessFlowSkill = readFileSync('skills/business-flow/SKILL.md', 'utf8');
 const syncVerifySkill = readFileSync('skills/sync-verify/SKILL.md', 'utf8');
+const wikiSkill = readFileSync('skills/wiki/SKILL.md', 'utf8');
+const codexPlugin = JSON.parse(readFileSync('.codex-plugin/plugin.json', 'utf8'));
+const claudePlugin = JSON.parse(readFileSync('.claude-plugin/plugin.json', 'utf8'));
 
 test('skill documents creation workflow before scripts', () => {
   assert.match(skill, /yog:init/);
@@ -24,6 +27,42 @@ test('skill documents creation workflow before scripts', () => {
   assert.match(skill, /create-capability/);
   assert.match(skill, /create-evidence/);
   assert.match(skill, /business-flow entries/);
+});
+
+test('wiki skill documents the product-oriented MVP workflow contract', () => {
+  assert.match(wikiSkill, /name: wiki/);
+  assert.match(wikiSkill, /yog:wiki generate/);
+  assert.doesNotMatch(wikiSkill, /yog:wiki init|init-wiki\.mjs/);
+  assert.match(wikiSkill, /menu description/i);
+  assert.match(wikiSkill, /Record Skill/);
+  assert.match(wikiSkill, /Wiki output root/);
+  assert.match(wikiSkill, /user-provided code paths/);
+  assert.match(wikiSkill, /Record, Requirement, and Spec sources are optional/);
+  assert.match(wikiSkill, /stop and ask whether to generate only Record-related features or the full supplied menu scope/);
+  assert.match(wikiSkill, /inspect its complete product surface/);
+  assert.match(wikiSkill, /product-review drafts/);
+  assert.match(wikiSkill, /generate-wiki-mvp\.mjs/);
+  assert.match(wikiSkill, /产品功能\//);
+  assert.match(wikiSkill, /用户场景\//);
+  assert.match(wikiSkill, /CodeGraph or an equivalent symbol graph may enrich/);
+  assert.match(wikiSkill, /Do not generate pages for unrelated repositories/);
+  assert.match(wikiSkill, /managedBy: yog:wiki-mvp/);
+  assert.match(wikiSkill, /Requirement Retrieval Gate/);
+  assert.match(wikiSkill, /Never search every project visible to the account/);
+  assert.match(wikiSkill, /Never infer hierarchy from an ID format/);
+  assert.match(wikiSkill, /Only completed product requirements may become current `requirementEvidenceIds`/);
+  assert.match(wikiSkill, /type: requirement/);
+  assert.match(wikiSkill, /code Evidence IDs/);
+  assert.doesNotMatch(wikiSkill, /Reader Agent|Evidence Judge|apply-wiki-refresh\.mjs/);
+});
+
+test('both plugin manifests discover the shared wiki skill directory', () => {
+  assert.equal(codexPlugin.skills, './skills/');
+  assert.equal(claudePlugin.skills, './skills/');
+  assert.match(codexPlugin.interface.defaultPrompt.join('\n'), /yog:wiki/);
+  assert.match(codexPlugin.interface.defaultPrompt.join('\n'), /focused product Wiki/);
+  assert.doesNotMatch(codexPlugin.interface.defaultPrompt.join('\n'), /engineering Repo Wiki|architecture, modules, dependencies/);
+  assert.equal(existsSync('skills/wiki/SKILL.md'), true);
 });
 
 test('skill documents exit codes and candidate confirmation', () => {

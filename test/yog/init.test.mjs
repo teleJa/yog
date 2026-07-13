@@ -49,6 +49,7 @@ test('init creates docs/knowledge skeleton config and managed blocks', () => {
   assert.equal(existsSync(join(repoRoot, 'docs/knowledge/templates/evidence.md')), true);
   assert.equal(existsSync(join(repoRoot, '.yog/config.json')), true);
   const config = JSON.parse(readFileSync(join(repoRoot, '.yog/config.json'), 'utf8'));
+  assert.equal(config.language, 'zh-CN');
   assert.deepEqual(config.discover, { maxMidLowCandidates: 10 });
   const agents = readFileSync(join(repoRoot, 'AGENTS.md'), 'utf8');
   const claude = readFileSync(join(repoRoot, 'CLAUDE.md'), 'utf8');
@@ -89,6 +90,13 @@ test('init can record selected tool configuration without requiring tools for in
   assert.equal(deprecatedToolKey in config, false);
   assert.deepEqual(config.codeFactProvider, { type: 'none', status: 'not-configured' });
   assert.deepEqual(config.discover, { maxMidLowCandidates: 10 });
+});
+
+test('init rejects non-MVP languages without rewriting config', () => {
+  const repoRoot = tempRepo();
+  const result = runInit(repoRoot, { language: 'en-US' });
+  assert.equal(result.status, 2);
+  assert.equal(existsSync(join(repoRoot, '.yog/config.json')), false);
 });
 
 test('init defaults to Yog code fact tools when configuration is omitted', () => {

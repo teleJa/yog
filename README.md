@@ -2,7 +2,7 @@
 
 [中文说明](./README.zh-CN.md)
 
-Yog is a business knowledge-base plugin for AI coding agents. It helps a repository keep durable project knowledge in `docs/knowledge`, organized by business context, capability, evidence, business flow, candidate, and ADR documents.
+Yog is a business knowledge-base and product Wiki plugin for AI coding agents. It keeps durable project knowledge in `docs/knowledge` and can generate a focused, evidence-backed Chinese product manual under `docs/wiki`.
 
 Yog is designed for agent-first work. The user talks to Codex or Claude Code, the Yog skill guides the agent to read the right knowledge files before design or implementation work, and deterministic Node scripts handle filesystem changes, indexing, linting, and verification.
 
@@ -21,6 +21,7 @@ Yog provides a repository-local knowledge protocol:
 - `evidence/` ties business claims back to code, routes, tables, messages, tests, or human-reviewed sources, with generation metadata and development verification suggestions.
 - `candidates/` stores unconfirmed business-context candidates before promotion.
 - generated `index.json` and `INDEX.md` make the knowledge base easy to route and verify.
+- `yog:wiki generate` turns a confirmed menu scope, optional business sources, and selected code paths into product feature and Record-backed scenario pages under `docs/wiki`.
 
 ## Current Plugin Surface
 
@@ -32,6 +33,7 @@ skills/init/SKILL.md                Initialize docs/knowledge in a repository
 skills/discover-candidates/SKILL.md Discover needs-review candidate contexts
 skills/business-flow/SKILL.md       Create cross-context business-flow overviews
 skills/sync-verify/SKILL.md         Sync, verify, build-index, check-index, and lint
+skills/wiki/SKILL.md                Generate a focused product Wiki under docs/wiki
 ```
 
 The skills call internal Node ESM scripts under:
@@ -39,6 +41,10 @@ The skills call internal Node ESM scripts under:
 ```text
 skills/yog/scripts/
 ```
+
+Repo Wiki exposes one agent command, `yog:wiki generate`. It generates a focused Chinese product Wiki from a user-confirmed menu scope, optional Record business flows, optional Requirement or Spec context, and user-provided code paths. First-level menus become directories and second-level menus become product feature pages; only Record inputs may create user scenario pages. CodeGraph can enrich selected code relationships but is not required. The MVP validates evidence, internal links, sensitive output, and the complete generated tree before replacing a Wiki already managed by `yog:wiki-mvp`; unmanaged `docs/wiki` content is never adopted or overwritten.
+
+Initialization writes `"language": "zh-CN"` to `.yog/config.json`. The product Wiki MVP currently supports only `zh-CN`.
 
 The first public version intentionally does not expose a standalone CLI, MCP server, HTTP server, or user-visible command set. The scripts are stable internal automation points for the skills and tests.
 
@@ -119,6 +125,75 @@ JSON
 This creates `docs/knowledge`, writes `.yog/config.json`, and upserts Yog managed guidance into root `AGENTS.md` and `CLAUDE.md`. It does not overwrite existing `docs/knowledge/**` files.
 
 ## Core Workflows
+
+### Generate A Product Wiki
+
+Ask the agent to run `yog:wiki generate`. The agent collects and echoes the authorized scope before reading sources or writing the Wiki.
+
+Required inputs:
+
+- a menu description that can be parsed as first-level menu groups and second-level features;
+- an absolute Wiki output root;
+- one or more absolute code paths supplied by the user.
+
+Optional inputs:
+
+- Record Skill directories produced from recorded product operations;
+- Requirement work item IDs, links, or a user-confirmed bounded project scope;
+- explicit Spec file or directory paths.
+
+Example request:
+
+```text
+Use yog:wiki to generate the full supplied menu scope.
+Menu: Client Decoration -> Client Pages, Page Management, Popup Ads, Client Settings
+Output root: /absolute/path/to/product
+Code paths: /absolute/path/to/frontend, /absolute/path/to/backend
+Requirement scope: TAPD workspace 12345678
+No Record or Spec is available for this run.
+```
+
+The menu is the only source allowed to create feature names. First-level menus become directories and second-level menus become Markdown feature pages. Requirement and Spec sources may enrich those features but cannot expand the menu. Record is the only source allowed to create user scenario pages. When a Record covers only part of the supplied menu and the user has not selected a scope, the agent stops and asks whether to generate only Record-related features or the complete menu scope.
+
+When `<outputRoot>/.yog/config.json` exists, Yog reads the optional Requirement Provider routing metadata:
+
+```json
+{
+  "language": "zh-CN",
+  "wiki": {
+    "requirementProvider": {
+      "provider": "tapd",
+      "transport": "mcp",
+      "serverRef": "tapd"
+    }
+  }
+}
+```
+
+The MVP currently supports Chinese output and TAPD over an already configured MCP server. The config stores references only, never tokens. If Requirement or Spec context is unavailable, menu plus code generation continues with reduced evidence coverage.
+
+Generated structure:
+
+```text
+docs/wiki/
+  目录.md
+  产品功能/
+    <一级菜单>/
+      <二级菜单>.md
+  用户场景/
+    <一级菜单>/
+      <Record 场景名称>.md
+  待确认问题.md              # only when product-review gaps exist
+  _meta/
+    catalog.json
+    claims.json
+    evidence.json
+    manifest.json
+```
+
+The MVP does not generate first-level menu index pages, acceptance pages, third-level feature pages, business-flow pages, or separate architecture, module, API, and data-model directories. Technical associations remain concise sections inside product pages; detailed evidence stays in `_meta`.
+
+Publication is all-or-nothing. A missing target is created. An existing target is replaced only when its manifest declares `managedBy: yog:wiki-mvp`; an unmanaged `docs/wiki` blocks publication. The MVP does not expose refresh, verify, resume, or automatic menu monitoring.
 
 ### Initialize A Knowledge Base
 
@@ -217,7 +292,7 @@ Run the test suite:
 npm test
 ```
 
-The tests use temporary repositories and cover initialization, document creation, candidate reduction, hook installation, indexing, linting, verification, sync, routing, script contracts, and non-goals.
+The tests use temporary repositories and cover initialization, document creation, candidate reduction, hook installation, indexing, linting, verification, sync, routing, the product Wiki MVP, script contracts, and non-goals.
 
 ## Why index.json Instead Of RAG
 
@@ -239,6 +314,8 @@ For the current version, Yog does not provide:
 - an MCP server;
 - a web service or daemon;
 - automatic discovery without CodeGraph;
+- product Wiki refresh, resume, automatic menu monitoring, or Reader/Evidence Judge workflows;
+- product Wiki output languages other than `zh-CN` in the MVP;
 - publication as an npm package.
 
 ## License

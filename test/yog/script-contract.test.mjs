@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -14,6 +14,15 @@ function runNode(args, options = {}) {
     encoding: 'utf8',
     maxBuffer: 1024 * 1024 * 10,
   });
+}
+
+function runGit(repoRoot, args, options = {}) {
+  const result = spawnSync('git', ['-C', repoRoot, ...args], {
+    encoding: 'utf8',
+    env: { ...process.env, ...(options.env ?? {}) },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout.trim();
 }
 
 function candidate(index) {
@@ -41,7 +50,7 @@ test('plugin exposes Yog skill entry directories', () => {
   assert.equal(existsSync(join(root, 'skills/sync-verify/SKILL.md')), true);
   assert.deepEqual(
     readdirSync(join(root, 'skills')).filter((entry) => existsSync(join(root, 'skills', entry, 'SKILL.md'))).sort(),
-    ['business-flow', 'discover-candidates', 'init', 'sync-verify', 'yog'],
+    ['business-flow', 'discover-candidates', 'init', 'sync-verify', 'wiki', 'yog'],
   );
 });
 
@@ -144,4 +153,21 @@ test('reduce-candidates exit 3 still emits complete parseable JSON', () => {
   assert.equal(output.gate, 'batch-duplicates-require-resolution');
   assert.equal(output.stats.batchDuplicates, 1);
   assert.equal(result.stderr, '');
+});
+
+test('wiki init workflow is not exposed', () => {
+  assert.equal(existsSync(join(root, 'skills/yog/scripts/init-wiki.mjs')), false);
+});
+
+test('wiki MVP exposes only its generation script', () => {
+  assert.equal(existsSync(join(root, 'skills/yog/scripts/generate-wiki-mvp.mjs')), true);
+  for (const legacy of [
+    'generate-wiki.mjs',
+    'check-wiki.mjs',
+    'plan-wiki-refresh.mjs',
+    'apply-wiki-refresh.mjs',
+    'build-wiki-evidence-batches.mjs',
+  ]) {
+    assert.equal(existsSync(join(root, 'skills/yog/scripts', legacy)), false, legacy);
+  }
 });
