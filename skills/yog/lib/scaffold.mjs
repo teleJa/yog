@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CODE_SYMBOL_PATTERN, EVIDENCE_KINDS, ID_PATTERN } from './constants.mjs';
@@ -82,6 +82,7 @@ export function upgradeGuidance(input = {}) {
       applied: apply,
       changed,
       unchanged,
+      hookUpgrade: null,
     };
   }
   for (const fileName of guidanceFiles) {
@@ -106,7 +107,7 @@ export function upgradeGuidance(input = {}) {
     });
     if (apply) writeFileSync(target, expected);
   }
-  for (const fileName of ['AGENTS.md', 'CLAUDE.md']) {
+  for (const fileName of ['AGENTS.md']) {
     const target = join(context.repoRoot, fileName);
     const path = fileName;
     const current = existsSync(target) ? readFileSync(target, 'utf8') : '';
@@ -123,87 +124,171 @@ export function upgradeGuidance(input = {}) {
     });
     if (apply) writeFileSync(target, expected);
   }
+  let hookUpgrade = null;
+  const hookScriptInstalled = existsSync(join(context.repoRoot, '.codex/hooks', HOOK_SCRIPT_NAME));
+  const hookConfigPath = join(context.repoRoot, '.codex/hooks.json');
+  const hookConfigured = existsSync(hookConfigPath)
+    && readFileSync(hookConfigPath, 'utf8').includes(`.codex/hooks/${HOOK_SCRIPT_NAME}`);
+  if (apply && (hookScriptInstalled || hookConfigured)) {
+    hookUpgrade = installHooks({ repoRoot: context.repoRoot, knowledgeRoot: context.knowledgeRoot, payload: {} });
+    issues.push(...hookUpgrade.issues);
+    changed.push(...hookUpgrade.changed.filter((path) => !changed.includes(path)));
+    unchanged.push(...hookUpgrade.unchanged.filter((path) => !unchanged.includes(path)));
+  }
   return {
     issues,
     applied: apply,
     changed,
     unchanged,
+    hookUpgrade,
   };
 }
 
 const HOOK_SCRIPT_SOURCE = join(pluginRoot, 'skills/yog/hooks/user-prompt-submit.mjs');
 const HOOK_SCRIPT_NAME = 'yog-user-prompt-submit.mjs';
-const ALL_HOOK_PLATFORMS = ['claude', 'codex'];
+const CODEX_HOOK_SCRIPT_PATH = `.codex/hooks/${HOOK_SCRIPT_NAME}`;
+const CODEX_HOOK_CONFIG_PATH = '.codex/hooks.json';
+const CODEX_HOOK_COMMAND = `node "$(git rev-parse --show-toplevel)/${CODEX_HOOK_SCRIPT_PATH}"`;
 
-function copyHookScript(repoRoot, platformDir) {
-  const targetDir = join(repoRoot, platformDir, 'hooks');
-  mkdirSync(targetDir, { recursive: true });
-  const target = join(targetDir, HOOK_SCRIPT_NAME);
-  writeFileSync(target, readFileSync(HOOK_SCRIPT_SOURCE, 'utf8'));
-  return repoRelative(repoRoot, target);
+function writeFileAtomic(target, content) {
+  mkdirSync(dirname(target), { recursive: true });
+  const temporary = `${target}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    writeFileSync(temporary, content);
+    renameSync(temporary, target);
+  } catch (error) {
+    if (existsSync(temporary)) unlinkSync(temporary);
+    throw error;
+  }
 }
 
-function installClaudeHook(repoRoot, scriptPath, installed) {
-  const settingsPath = join(repoRoot, '.claude/settings.json');
-  let settings = {};
-  if (existsSync(settingsPath)) {
-    try {
-      settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
-    } catch {
-      return { severity: 'P1', message: 'Existing .claude/settings.json is not valid JSON; skipped hook install.', path: '.claude/settings.json' };
+function parseCodexHooks(repoRoot) {
+  const path = join(repoRoot, CODEX_HOOK_CONFIG_PATH);
+  if (!existsSync(path)) return { path, raw: null, document: {} };
+  const raw = readFileSync(path, 'utf8');
+  try {
+    const document = JSON.parse(raw);
+    if (!document || typeof document !== 'object' || Array.isArray(document)) throw new Error('root-not-object');
+    return { path, raw, document };
+  } catch {
+    return {
+      path,
+      raw,
+      issue: {
+        severity: 'P1',
+        message: 'Existing .codex/hooks.json is not valid hook JSON; no managed hook artifact was changed.',
+        path: CODEX_HOOK_CONFIG_PATH,
+      },
+    };
+  }
+}
+
+function isYogHook(handler) {
+  return typeof handler?.command === 'string' && handler.command.includes(CODEX_HOOK_SCRIPT_PATH);
+}
+
+function upsertCodexHook(document) {
+  const next = structuredClone(document);
+  const hooks = next.hooks && typeof next.hooks === 'object' && !Array.isArray(next.hooks) ? next.hooks : {};
+  const groups = Array.isArray(hooks.UserPromptSubmit) ? hooks.UserPromptSubmit : [];
+  const preservedGroups = [];
+  let existingCount = 0;
+  for (const group of groups) {
+    if (!group || typeof group !== 'object' || !Array.isArray(group.hooks)) {
+      preservedGroups.push(group);
+      continue;
     }
+    const preservedHandlers = group.hooks.filter((handler) => {
+      if (!isYogHook(handler)) return true;
+      existingCount += 1;
+      return false;
+    });
+    if (preservedHandlers.length > 0) preservedGroups.push({ ...group, hooks: preservedHandlers });
   }
-  const command = `node ${scriptPath}`;
-  settings.hooks = settings.hooks ?? {};
-  const entries = Array.isArray(settings.hooks.UserPromptSubmit) ? settings.hooks.UserPromptSubmit : [];
-  const already = entries.some((entry) => Array.isArray(entry.hooks) && entry.hooks.some((hook) => hook.command === command));
-  if (!already) {
-    entries.push({ hooks: [{ type: 'command', command }] });
-    settings.hooks.UserPromptSubmit = entries;
-    mkdirSync(dirname(settingsPath), { recursive: true });
-    writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
-    installed.push('.claude/settings.json');
-  }
-  return null;
+  preservedGroups.push({
+    matcher: '',
+    hooks: [{ type: 'command', command: CODEX_HOOK_COMMAND, timeout: 10 }],
+  });
+  hooks.UserPromptSubmit = preservedGroups;
+  next.hooks = hooks;
+  const content = `${JSON.stringify(next, null, 2)}\n`;
+  return {
+    content,
+    existingCount,
+    changed: content !== `${JSON.stringify(document, null, 2)}\n`,
+  };
 }
 
-function codexManualHint(scriptPath) {
-  return [
-    'Codex hooks are not auto-configured. To enable the Yog UserPromptSubmit hook, add to your Codex config.toml:',
-    '',
-    '[features]',
-    'hooks = true',
-    '',
-    '[hooks]',
-    `UserPromptSubmit = [{ command = "node ${scriptPath}", timeout = 10 }]`,
-    '',
-    'The exact [hooks] array syntax may vary by Codex version; adjust if Codex reports a parse error.',
-  ].join('\n');
+function restoreFile(path, raw) {
+  if (raw === null) {
+    if (existsSync(path)) unlinkSync(path);
+    return;
+  }
+  writeFileAtomic(path, raw);
 }
 
 export function installHooks(input = {}) {
   const context = resolveRepoContext(input);
-  const requested = input.payload?.platforms ?? ALL_HOOK_PLATFORMS;
-  const platforms = ALL_HOOK_PLATFORMS.filter((platform) => requested.includes(platform));
   const issues = [];
-  const installed = [];
-  let codexHint = null;
-  if (platforms.length === 0) {
-    return { issues: [{ severity: 'P1', message: 'No known platform requested. Use claude and/or codex.', path: '.yog/config.json' }], installed, platforms: [] };
+  const requested = input.payload?.platforms;
+  if (requested !== undefined && (!Array.isArray(requested) || requested.some((platform) => platform !== 'codex'))) {
+    return {
+      issues: [{ severity: 'P1', message: 'Yog hooks support Codex only; omit platforms or use ["codex"].', path: '.yog/config.json' }],
+      changed: [],
+      unchanged: [],
+      platforms: [],
+      reviewRequired: false,
+    };
   }
-  if (platforms.includes('claude')) {
-    const scriptPath = copyHookScript(context.repoRoot, '.claude');
-    installed.push(scriptPath);
-    const claudeIssue = installClaudeHook(context.repoRoot, scriptPath, installed);
-    if (claudeIssue) issues.push(claudeIssue);
+
+  const parsed = parseCodexHooks(context.repoRoot);
+  if (parsed.issue) {
+    return { issues: [parsed.issue], changed: [], unchanged: [], platforms: ['codex'], reviewRequired: false };
   }
-  if (platforms.includes('codex')) {
-    const scriptPath = copyHookScript(context.repoRoot, '.codex');
-    installed.push(scriptPath);
-    codexHint = codexManualHint(scriptPath);
-    issues.push({ severity: 'P2', message: 'Codex hook script copied; enable it manually in config.toml.', path: scriptPath, details: { hint: codexHint } });
+
+  const scriptTarget = join(context.repoRoot, CODEX_HOOK_SCRIPT_PATH);
+  const scriptRaw = existsSync(scriptTarget) ? readFileSync(scriptTarget, 'utf8') : null;
+  const expectedScript = readFileSync(HOOK_SCRIPT_SOURCE, 'utf8');
+  const scriptChanged = scriptRaw !== expectedScript;
+  const nextHooks = upsertCodexHook(parsed.document);
+  const configChanged = parsed.raw === null || nextHooks.content !== parsed.raw;
+  const changed = [];
+  const unchanged = [];
+
+  try {
+    if (scriptChanged) {
+      writeFileAtomic(scriptTarget, expectedScript);
+      changed.push(CODEX_HOOK_SCRIPT_PATH);
+    } else {
+      unchanged.push(CODEX_HOOK_SCRIPT_PATH);
+    }
+    if (configChanged) {
+      writeFileAtomic(parsed.path, nextHooks.content);
+      changed.push(CODEX_HOOK_CONFIG_PATH);
+    } else {
+      unchanged.push(CODEX_HOOK_CONFIG_PATH);
+    }
+  } catch (error) {
+    try {
+      restoreFile(scriptTarget, scriptRaw);
+      restoreFile(parsed.path, parsed.raw);
+    } catch (restoreError) {
+      issues.push({ severity: 'P0', message: 'Hook install failed and rollback was incomplete.', path: CODEX_HOOK_CONFIG_PATH, details: { reason: restoreError.message } });
+    }
+    issues.push({ severity: 'P1', message: 'Hook install failed; managed artifacts were rolled back.', path: CODEX_HOOK_CONFIG_PATH, details: { reason: error.message } });
+    return { issues, changed: [], unchanged: [], platforms: ['codex'], reviewRequired: false };
   }
-  return { issues, installed, platforms, codexManualHint: codexHint };
+
+  return {
+    issues,
+    changed,
+    unchanged,
+    platforms: ['codex'],
+    reviewRequired: configChanged,
+    hookDefinitionChanged: configChanged,
+    scriptChanged,
+    reviewInstruction: configChanged ? 'Run /hooks in Codex to inspect the project hook source and trust the new or changed definition.' : null,
+  };
 }
 
 function normalizeDuplicateToken(value) {

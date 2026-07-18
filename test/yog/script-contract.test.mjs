@@ -44,13 +44,13 @@ function candidate(index) {
 
 test('plugin exposes Yog skill entry directories', () => {
   assert.equal(existsSync(join(root, 'skills/yog/SKILL.md')), true);
-  assert.equal(existsSync(join(root, 'skills/init/SKILL.md')), true);
-  assert.equal(existsSync(join(root, 'skills/discover-candidates/SKILL.md')), true);
-  assert.equal(existsSync(join(root, 'skills/business-flow/SKILL.md')), true);
-  assert.equal(existsSync(join(root, 'skills/sync-verify/SKILL.md')), true);
+  assert.equal(existsSync(join(root, 'skills/knowledge/SKILL.md')), true);
+  assert.equal(existsSync(join(root, 'skills/knowledge-query/SKILL.md')), true);
+  assert.equal(existsSync(join(root, 'skills/wiki-query/SKILL.md')), true);
+  assert.equal(existsSync(join(root, 'skills/wiki-review/SKILL.md')), true);
   assert.deepEqual(
     readdirSync(join(root, 'skills')).filter((entry) => existsSync(join(root, 'skills', entry, 'SKILL.md'))).sort(),
-    ['business-flow', 'discover-candidates', 'init', 'sync-verify', 'wiki', 'yog'],
+    ['knowledge', 'knowledge-query', 'wiki', 'wiki-query', 'wiki-review', 'yog'],
   );
 });
 
@@ -101,7 +101,7 @@ test('lint script without custom knowledgeRoot returns configured structured P0'
   });
 });
 
-test('install-hooks script returns structured error for unknown platforms', () => {
+test('install-hooks script returns structured error for non-Codex platforms', () => {
   const repoRoot = mkdtempSync(join(tmpdir(), 'yog-contract-hooks-'));
   mkdirSync(join(repoRoot, '.git'));
   const result = runNode(['skills/yog/scripts/install-hooks.mjs'], {
@@ -128,7 +128,13 @@ test('upgrade-guidance script accepts empty stdin as structured input', () => {
     applied: false,
     changed: [],
     unchanged: [],
+    hookUpgrade: null,
   });
+});
+
+test('audit scripts exist as internal deterministic write actions', () => {
+  assert.equal(existsSync(join(root, 'skills/yog/scripts/knowledge-audit.mjs')), true);
+  assert.equal(existsSync(join(root, 'skills/yog/scripts/wiki-audit.mjs')), true);
 });
 
 test('reduce-candidates exit 3 still emits complete parseable JSON', () => {
@@ -159,10 +165,22 @@ test('wiki init workflow is not exposed', () => {
   assert.equal(existsSync(join(root, 'skills/yog/scripts/init-wiki.mjs')), false);
 });
 
-test('wiki MVP exposes only its generation script', () => {
-  assert.equal(existsSync(join(root, 'skills/yog/scripts/generate-wiki-mvp.mjs')), true);
-  for (const legacy of [
+test('wiki lifecycle exposes prepare confirmation generate update sync and verify scripts', () => {
+  for (const script of [
+    'prepare-wiki.mjs',
+    'confirm-wiki-sources.mjs',
+    'stage-wiki-input.mjs',
     'generate-wiki.mjs',
+    'update-wiki.mjs',
+    'sync-wiki.mjs',
+    'verify-wiki.mjs',
+    'draft-wiki-decision.mjs',
+    'confirm-wiki-decision.mjs',
+  ]) {
+    assert.equal(existsSync(join(root, 'skills/yog/scripts', script)), true, script);
+  }
+  for (const legacy of [
+    `${['generate', 'wiki', 'mvp'].join('-')}.mjs`,
     'check-wiki.mjs',
     'plan-wiki-refresh.mjs',
     'apply-wiki-refresh.mjs',

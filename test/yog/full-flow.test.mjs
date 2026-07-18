@@ -74,7 +74,9 @@ test('full Yog flow honors custom knowledgeRoot in files indexes lint and routin
   assert.equal(runWithInput(repoRoot, 'init', { repoRoot, knowledgeRoot }).status, 0);
   assert.equal(existsSync(join(repoRoot, 'knowledge/README.md')), true);
   assert.equal(existsSync(join(repoRoot, 'docs/knowledge/README.md')), false);
-  assert.match(readFileSync(join(repoRoot, 'AGENTS.md'), 'utf8'), /first read knowledge\/index\.json, knowledge\/INDEX\.md, and knowledge\/CONTEXT-MAP\.md/);
+  const managedBlock = readFileSync(join(repoRoot, 'AGENTS.md'), 'utf8');
+  assert.match(managedBlock, /routes through knowledge\/index\.json, INDEX\.md, matching business-flow, and CONTEXT-MAP\.md/);
+  assert.doesNotMatch(managedBlock, /docs\/knowledge\/index\.json/);
 
   assert.equal(run(repoRoot, 'create-context', {
     contextId: 'order',

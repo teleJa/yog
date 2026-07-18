@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// Yog UserPromptSubmit hook — copied into a repository's .claude/hooks/ and .codex/hooks/
+// Yog UserPromptSubmit hook — copied into a repository's .codex/hooks/
 // by the Yog install-hooks step. Self-contained on purpose: this runs on EVERY user
 // prompt, so it must never crash and never block. It imports nothing from the Yog plugin.
 //
-// Contract (shared by Claude Code and Codex CLI):
+// Codex contract:
 // - reads platform JSON on stdin (structure not relied upon)
 // - writes a SINGLE-LINE JSON object with hookSpecificOutput.additionalContext
 // - always exits 0; it is an enhancement, never a gate on the user's prompt
@@ -38,15 +38,15 @@ function resolveKnowledgeRoot() {
 }
 
 function hookAdditionalContext(knowledgeRoot) {
-  return `Yog knowledge base: before business, design, interface, or implementation work, route through ${knowledgeRoot}/index.json, ${knowledgeRoot}/INDEX.md, and ${knowledgeRoot}/CONTEXT-MAP.md. If a matching business-flow exists, read it first, then read the relevant context/capability/evidence documents, including routing rules, common misjudgments, non-reuse boundaries, and stop-to-confirm checkpoints.`;
+  return `Explicit Yog skill invocation is authoritative. yog:wiki-query reads docs/wiki; yog:knowledge-query reads ${knowledgeRoot}. Without an explicit query skill, choose by the question's required knowledge perspective, never by user role. If ambiguous, query Wiki first and Knowledge second and label both source sets. Only concrete coding, debugging, refactoring, interface implementation, or code-impact work defaults to ${knowledgeRoot}/index.json, INDEX.md, matching business-flow, and CONTEXT-MAP.md as supporting context.`;
 }
 
 function hookMissingKnowledgeNotice(knowledgeRoot) {
-  return `Yog knowledge base is not initialized in this repository (${knowledgeRoot}/CONTEXT-MAP.md not found). Run the Yog init step to create it before relying on business-context routing.`;
+  return `Explicit Yog skill invocation is authoritative. Yog Knowledge is not initialized (${knowledgeRoot}/CONTEXT-MAP.md missing), but this never blocks yog:wiki-query. Query selection follows the question's knowledge perspective, never user role; if ambiguous, query Wiki first, mark Knowledge unavailable, and label sources. Run yog:knowledge init only when initialization is explicitly requested.`;
 }
 
 function emit(additionalContext) {
-  // Single-line JSON: Claude Code silently drops multi-line hook output.
+  // Keep output to one JSON line for predictable Codex hook parsing.
   const payload = { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext } };
   process.stdout.write(JSON.stringify(payload));
 }

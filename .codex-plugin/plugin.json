@@ -19,8 +19,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Yog",
-    "shortDescription": "Maintain docs/knowledge business knowledge bases.",
-    "longDescription": "Yog initializes and maintains docs/knowledge business context, capability, evidence, candidate, ADR, and generated routing indexes for agent-first repository work.",
+    "shortDescription": "Build and query product Wiki and coding-agent Knowledge.",
+    "longDescription": "Yog builds and queries a product Wiki under docs/wiki and coding-agent business knowledge under docs/knowledge, with separate read and write skill boundaries.",
     "developerName": "Yog Contributors",
     "category": "Productivity",
     "capabilities": [
@@ -31,12 +31,9 @@
     "privacyPolicyURL": "https://example.com/privacy",
     "termsOfServiceURL": "https://example.com/terms",
     "defaultPrompt": [
-      "Use yog:init to initialize this repository.",
-      "Use yog:discover-candidates to discover context candidates for this project.",
-      "Use yog:sync-verify to sync and verify this docs/knowledge knowledge base.",
-      "Use Yog to review and promote a candidate into a formal context.",
-      "Use yog:business-flow to create a business-flow overview from existing contexts.",
-      "Use yog:wiki to generate a focused product Wiki from a confirmed menu scope, optional Record, Requirement or Spec context, and user-provided code paths."
+      "Use yog:knowledge to build or maintain coding-agent business knowledge.",
+      "Use yog:wiki to generate a product Wiki, or yog:wiki-review to decide one atomic ReviewItem.",
+      "Use yog:knowledge-query for engineering questions from docs/knowledge, or yog:wiki-query for product questions from docs/wiki."
     ],
     "brandColor": "#2563EB"
   }

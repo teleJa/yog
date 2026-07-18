@@ -5,10 +5,10 @@ import { routingCoreInstruction } from './routing-guidance.mjs';
 
 export function managedBlock(knowledgeRoot = 'docs/knowledge') {
   return `${MANAGED_BLOCK_START}
-Yog knowledge routing rules:
+Yog routing rules:
 - ${routingCoreInstruction(knowledgeRoot)}
-- If no context matches, use ${knowledgeRoot}/INDEX.md for routing, then explore code and docs directly.
-- Use CodeGraph, repository scans, or tests to verify current code facts. Prefer CodeGraph for call-chain and symbol evidence. If code facts conflict with ${knowledgeRoot}, use current code facts for the task and recommend marking the stale knowledge.
+- For Knowledge implementation facts, use Knowledge-routed symbols/routes as bounded CodeGraph seeds. Do not replace unavailable or uncovered CodeGraph evidence with a whole-repository source scan.
+- Query skills are read-only. Only an invalid managed root may hand off to its separate Audit writer; ordinary queries, gaps, or drift do not authorize writes.
 - After a change lands, re-check the evidence documents you relied on. If the change made them inaccurate, update them or mark them stale.
 - To make this routing reminder automatic on every prompt, ask Yog to run install-hooks. The hook is optional and non-blocking.
 - Run automatic discover-candidates only when CodeGraph is initialized for this repository; otherwise ask to initialize CodeGraph first.
@@ -23,9 +23,7 @@ export function upsertManagedBlock(content, knowledgeRoot) {
 }
 
 export function writeRootManagedBlocks(repoRoot, knowledgeRoot) {
-  for (const fileName of ['AGENTS.md', 'CLAUDE.md']) {
-    const target = join(repoRoot, fileName);
-    const current = existsSync(target) ? readFileSync(target, 'utf8') : '';
-    writeFileSync(target, upsertManagedBlock(current, knowledgeRoot));
-  }
+  const target = join(repoRoot, 'AGENTS.md');
+  const current = existsSync(target) ? readFileSync(target, 'utf8') : '';
+  writeFileSync(target, upsertManagedBlock(current, knowledgeRoot));
 }

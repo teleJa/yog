@@ -10,12 +10,99 @@ export const DEFAULT_DISCOVER_CONFIG = {
 export const DEFAULT_LANGUAGE = 'zh-CN';
 export const SUPPORTED_LANGUAGES = ['zh-CN'];
 export const DEFAULT_WIKI_CONFIG = {
-  requirementProvider: {
-    provider: 'tapd',
-    transport: 'mcp',
-    serverRef: 'tapd',
-  },
+  root: 'docs/wiki',
+  sources: [
+    {
+      id: 'product-catalog',
+      kind: 'catalog',
+      provider: 'menu-json',
+      enabled: true,
+      required: true,
+      scope: { confirmedByUser: false },
+      transports: [{
+        id: 'catalog-file',
+        type: 'file',
+        enabled: true,
+        priority: 10,
+        paths: ['.yog/sources/catalog.json'],
+      }],
+    },
+    {
+      id: 'current-code',
+      kind: 'code',
+      provider: 'git-worktree',
+      enabled: true,
+      required: true,
+      scope: { roots: ['.'], exclude: ['docs/wiki'] },
+      transports: [
+        { id: 'worktree-files', type: 'file', enabled: true, priority: 10 },
+        { id: 'symbol-graph', type: 'codegraph', enabled: true, priority: 20 },
+      ],
+    },
+    {
+      id: 'primary-requirements',
+      kind: 'requirement',
+      provider: 'tapd',
+      enabled: true,
+      required: false,
+      scope: {
+        confirmedByUser: false,
+        workspaceId: null,
+        projectId: null,
+        workItemIds: [],
+      },
+      transports: [{
+        id: 'tapd-mcp',
+        type: 'mcp',
+        enabled: true,
+        priority: 10,
+        serverRef: 'tapd',
+      }],
+    },
+    {
+      id: 'primary-database',
+      kind: 'database',
+      provider: 'postgres',
+      enabled: false,
+      required: false,
+      capturePolicy: 'metadata-only',
+      scope: {
+        confirmedByUser: false,
+        environment: null,
+        includeSchemas: [],
+        excludeSchemas: ['pg_catalog', 'information_schema'],
+      },
+      freshness: { maxAgeHours: 24 },
+      limits: { statementTimeoutMs: 10000, maxObjects: 50000 },
+      transports: [{
+        id: 'database-introspection',
+        type: 'read-only-introspection',
+        enabled: false,
+        priority: 10,
+        credentialRef: 'database:primary',
+      }],
+    },
+    {
+      id: 'context-specs',
+      kind: 'spec',
+      provider: 'filesystem',
+      enabled: false,
+      required: false,
+      scope: { paths: [] },
+      transports: [{
+        id: 'spec-files',
+        type: 'file',
+        enabled: false,
+        priority: 10,
+        paths: [],
+      }],
+    },
+  ],
 };
+
+function clone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
 
 export function normalizeLanguage(value = DEFAULT_LANGUAGE) {
   if (!SUPPORTED_LANGUAGES.includes(value)) {
@@ -33,6 +120,14 @@ function objectValue(value) {
 export function mergeConfig(existing = {}, updates = {}) {
   const existingWithoutDeprecatedTools = { ...existing };
   for (const key of DEPRECATED_TOOL_KEYS) delete existingWithoutDeprecatedTools[key];
+  const requestedWiki = updates.wiki ?? existingWithoutDeprecatedTools.wiki;
+  const normalizedWiki = Array.isArray(objectValue(requestedWiki).sources)
+    ? {
+        root: objectValue(requestedWiki).root ?? DEFAULT_WIKI_CONFIG.root,
+        sources: clone(objectValue(requestedWiki).sources),
+        ...(objectValue(requestedWiki).confirmation ? { confirmation: clone(objectValue(requestedWiki).confirmation) } : {}),
+      }
+    : clone(DEFAULT_WIKI_CONFIG);
   return {
     ...existingWithoutDeprecatedTools,
     ...updates,
@@ -43,16 +138,7 @@ export function mergeConfig(existing = {}, updates = {}) {
       ...objectValue(existingWithoutDeprecatedTools.discover),
       ...objectValue(updates.discover),
     },
-    wiki: {
-      ...DEFAULT_WIKI_CONFIG,
-      ...objectValue(existingWithoutDeprecatedTools.wiki),
-      ...objectValue(updates.wiki),
-      requirementProvider: {
-        ...DEFAULT_WIKI_CONFIG.requirementProvider,
-        ...objectValue(existingWithoutDeprecatedTools.wiki?.requirementProvider),
-        ...objectValue(updates.wiki?.requirementProvider),
-      },
-    },
+    wiki: normalizedWiki,
   };
 }
 

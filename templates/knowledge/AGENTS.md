@@ -4,7 +4,7 @@ These rules apply only to files under `docs/knowledge/**`.
 
 ## Entry Point
 
-- Use the root `AGENTS.md` or `CLAUDE.md` Yog managed block as the primary agent guidance.
+- Use the root `AGENTS.md` Yog managed block as the primary agent guidance.
 - Treat the Yog plugin skill as the complete specification for scripts, indexes, lint rules, and document contracts.
 - Use this file only as a short path-scoped reminder for edits inside this directory.
 
