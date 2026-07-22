@@ -10,3 +10,6 @@
 .yog/tmp/
 .idea
 .goal
+.codegraph
+docs/changes
+docs/requirement
